@@ -12,18 +12,20 @@ Use the local `smart-search` command as the default execution layer for web rese
 1. Run `smart-search doctor --format json` when configuration or availability is uncertain.
 2. If `doctor` reports missing configuration, use `smart-search setup` or `smart-search config set KEY VALUE` when the user provides keys. Do not ask users to edit global environment variables by default.
 3. If `doctor` returns `ok: true`, use only `smart-search` CLI subcommands for web research. Do not call Codex native web search in the same task.
-4. Use `smart-search smoke --mock --format json` after CLI/provider architecture changes. Use `--live` only when real keys are available and the user expects live checks.
-5. Use `smart-search search` for realtime, broad, community, or multi-source synthesis.
-6. Use `smart-search exa-search` for official documentation, API references, papers, and low-noise source discovery.
-7. Use `smart-search context7-library` / `context7-docs` only for library, SDK, API, framework, or documentation intent.
-8. Use `smart-search zhipu-search` for Chinese, domestic, current, or domain-filtered web source discovery.
-9. Use `smart-search anysearch-*` only for experimental AnySearch acceptance and vertical-domain boundary tests; do not treat it as the default web-search or fetch fallback.
-10. Use `smart-search exa-similar` when the user gives a representative URL and wants related pages or neighboring sources.
-11. Use `smart-search fetch` when the user gives a URL or a claim depends on page content.
-12. Use `smart-search map` when a documentation site or domain structure matters.
-13. Use `smart-search model current` only to inspect explicit provider models. To change models, use `smart-search config set XAI_MODEL ...` or `smart-search config set OPENAI_COMPATIBLE_MODEL ...`.
-14. For current-news, policy, finance, health, or other high-risk facts, do not answer from broad `search.content` alone. Find reliable URLs with `exa-search`, `zhipu-search`, or source-focused `search`, then `fetch` key pages and summarize only what the fetched text supports.
-15. Preserve command lines and source URLs in your answer. Prefer citing fetched pages or `primary_sources`; treat `extra_sources` as follow-up candidates, not verified evidence for generated claims.
+4. Use `smart-search skills status --targets codex --format json` when the global skill may be stale; use `smart-search skills update --targets codex --format json` to refresh this skill without rerunning setup.
+5. Use `smart-search smoke --mock --format json` after CLI/provider architecture changes. Use `--live` only when real keys are available and the user expects live checks.
+6. Use `smart-search search` as the first hop for realtime, broad exploration, community signals, multi-source summaries, and routing metadata.
+7. Use `smart-search zhipu-search` for Chinese-language, domestic China, policy/regulatory, announcements, current news, or China-local source discovery.
+8. Use `smart-search context7-library` / `context7-docs` first for library, SDK, API, framework, or documentation intent.
+9. Use `smart-search exa-search` for official domains, papers, product pages, trusted sites, and low-noise discovery. Do not treat Exa as the universal second hop for every high-risk or verification task.
+10. Use `smart-search search --extra-sources N` for Tavily/Firecrawl horizontal candidates, and `smart-search fetch` for page text that can support final claims.
+11. Use `smart-search anysearch-*` only for explicit experimental vertical search: call `anysearch-domains` first, then `anysearch-search` in a selected domain. Do not use AnySearch as default fallback.
+12. Use `smart-search exa-similar` when the user gives a representative URL and wants related pages or neighboring sources.
+13. Use `smart-search fetch` when the user gives a URL or a claim depends on page content.
+14. Use `smart-search map` when a documentation site or domain structure matters.
+15. Use `smart-search model current` only to inspect explicit provider models. To change models, use `smart-search config set XAI_MODEL ...` or `smart-search config set OPENAI_COMPATIBLE_MODEL ...`.
+16. For current-news, policy, finance, health, or other high-risk facts, do not answer from broad `search.content` alone. Select the second source by intent: Zhipu for Chinese/current/domestic, Context7 for docs/API, Exa for official/trusted domains or papers, then `fetch` key pages and summarize only what fetched text supports.
+17. Preserve command lines and source URLs in your answer. Prefer citing fetched pages or `primary_sources`; treat `extra_sources` as follow-up candidates, not verified evidence for generated claims.
 
 ## Deep Research Mode
 
@@ -99,10 +101,12 @@ Allowed `steps[].tool` values are `search`, `exa-search`, `exa-similar`, `zhipu-
 Capability boundaries:
 
 - `search`: broad discovery and synthesis through `main_search`; inspect `routing_decision`, `provider_attempts`, `fallback_used`, and `source_warning`. Do not treat broad answers as proof for high-risk claims.
-- `exa-search`: low-noise discovery for official docs, APIs, papers, product pages, known domains, trusted media, and recency-filtered source search.
+- `zhipu-search`: Chinese, domestic, current, policy/regulatory, announcement, and China-local source discovery.
+- `context7-library` / `context7-docs`: library, SDK, API, framework, and documentation intent. Prefer Context7 before Exa for docs/API questions.
+- `exa-search`: low-noise discovery for official domains, papers, product pages, known domains, and trusted pages. Use it when that boundary fits; it is not the default second hop for every verification task.
 - `exa-similar`: adjacent-source discovery when a known reliable URL is available.
-- `zhipu-search`: Chinese, domestic, current, or domain-filtered source discovery.
-- `context7-library` / `context7-docs`: library, SDK, API, framework, and documentation intent only.
+- `search --extra-sources N`: Tavily/Firecrawl horizontal candidate collection for breadth. Treat those candidates as discovery until fetched.
+- `anysearch-domains` / `anysearch-search`: experimental vertical search. Inspect domains first, then search a selected domain; do not insert it into the default fallback chain.
 - `fetch`: page-content evidence. Use it before claim-level conclusions.
 - `map`: site structure exploration before many fetches from one site; not claim evidence by itself.
 
@@ -132,6 +136,7 @@ smart-search deep "https://example.com/source" --format json
 ## Provider Routing
 
 - `search` builds `main_search` from configured peer providers: `XAI_API_KEY` for xAI Responses and `OPENAI_COMPATIBLE_API_URL` + `OPENAI_COMPATIBLE_API_KEY` for OpenAI-compatible Chat Completions.
+- `search` is the default first hop for broad exploration, current synthesis, and routing metadata.
 - Official xAI uses the Responses API `/responses` route through `XAI_*`. Compatible relays/gateways use Chat Completions `/chat/completions` through `OPENAI_COMPATIBLE_*`.
 - `OPENAI_COMPATIBLE_STREAM=true` or `search --stream` sets `stream=true` only for OpenAI-compatible `search` and provider-side `fetch`; it is a relay compatibility switch and does not affect xAI Responses, URL description, or source ranking.
 - Legacy `SMART_SEARCH_API_URL`, `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and `SMART_SEARCH_XAI_TOOLS` are unsupported config keys.
@@ -141,7 +146,7 @@ smart-search deep "https://example.com/source" --format json
 - AnySearch is reported only as optional experimental `vertical_search`; it is not part of the `web_search` fallback and is not required by the `standard` minimum profile.
 - `search` exposes `--validation fast|balanced|strict`, `--fallback auto|off`, and `--providers auto|CSV`. Default validation is `balanced`; fallback only happens within the same capability.
 - xAI Responses is the default main answer route for Grok/xAI. In `fallback=auto`, a failed xAI Responses main route can fall back to OpenAI-compatible only when the OpenAI-compatible provider is separately configured.
-- Docs routing uses Exa first, then Context7 only for docs/API/SDK/library/framework intent.
+- Docs/API/library routing should prefer Context7 first. Exa is for official-domain or low-noise supplemental discovery, not the default docs answer route.
 - Zhipu is a general web-search reinforcement and same-capability fallback for Chinese, domestic, current, or domain-filtered source discovery.
 - `search` calls Tavily and/or Firecrawl only when `--extra-sources N` is greater than 0.
 - With both Tavily and Firecrawl configured, `search --extra-sources N` splits extra sources between them, with Tavily receiving about 60% and Firecrawl the rest.
@@ -164,7 +169,7 @@ For multi-source research, use `--output` to save evidence under `C:\tmp\smart-s
 
 For claim-level evidence, prefer this order:
 
-1. Discover candidate URLs with `exa-search` or source-focused `search`.
+1. Discover candidate URLs with source-focused `search`, `zhipu-search` for Chinese/current/domestic topics, Context7 for docs/API/library topics, or `exa-search` for official/trusted domains and papers.
 2. Fetch the exact pages that matter.
 3. Use broad `search` only as synthesis or discovery, and mark claims as unverified when only `extra_sources` are available.
 
@@ -226,6 +231,9 @@ smart-search setup
 smart-search setup --lang en
 smart-search setup --advanced
 smart-search setup --non-interactive --install-skills hermes
+smart-search skills status --targets codex --format json
+smart-search skills update --targets codex --format json
+smart-search skills update --all --format json
 smart-search setup --non-interactive --zhipu-api-url "https://open.bigmodel.cn/api" --zhipu-search-engine "search_std"
 smart-search setup --non-interactive --openai-compatible-stream true
 smart-search setup --non-interactive --anysearch-api-url "https://api.anysearch.com/mcp" --anysearch-key "key"

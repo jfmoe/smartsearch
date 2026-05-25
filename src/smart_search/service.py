@@ -135,6 +135,24 @@ DEEP_RECENT_KEYWORDS = {
 }
 DEEP_CURRENT_KEYWORDS = {"今天", "实时", "刚刚", "当前", "现在", "today", "current", "live", "realtime"}
 DEEP_CHINA_KEYWORDS = {"中国", "国内", "中文", "政策", "监管", "公告", "A股", "港股"}
+DEEP_EXA_DISCOVERY_KEYWORDS = {
+    "官方",
+    "官网",
+    "论文",
+    "paper",
+    "papers",
+    "research paper",
+    "产品页",
+    "product page",
+    "可信站点",
+    "trusted",
+    "known domain",
+    "known domains",
+    "site:",
+    "白皮书",
+    "standard",
+    "standards",
+}
 MAIN_SEARCH_FALLBACK_CHAIN = ["xai-responses", "openai-compatible"]
 MAIN_SEARCH_PROVIDER_ALIASES = {
     "xai-responses": {"xai-responses", "xai", "grok", "grok-web-tools"},
@@ -455,18 +473,17 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 _deep_subquestion(
                     "sq2",
                     f"{question} 的官方文档、API 或 SDK 证据在哪里？",
-                    "docs/API intent requires low-noise documentation discovery.",
+                    "docs/API intent should resolve the library docs first, with Exa only as official-domain discovery.",
                     ["docs_source_discovery", "page_evidence"],
                 )
             )
             capability_plan.append(
                 _deep_capability(
                     "docs_source_discovery",
-                    ["exa-search", "context7-library", "context7-docs"],
-                    "Find official/API/library documentation before summarizing implementation guidance.",
+                    ["context7-library", "context7-docs"],
+                    "Resolve official library/API documentation first; use Exa only for official-domain or supplemental discovery.",
                 )
             )
-            add_step("sq2", "exa-search", "official docs and API source discovery", command_exa(question), "02-exa.json")
             library_hint = " ".join(re.findall(r"[A-Za-z][A-Za-z0-9_.-]*", question)[:2]) or "<library-name>"
             add_step(
                 "sq2",
@@ -482,6 +499,15 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 f"smart-search context7-docs {_quote_arg('<library_id>')} {_quote_arg(question)} --format json --output {_quote_arg(_path_join(evidence_root, next_filename('context7-docs.json')))}",
                 next_filename("context7-docs.json"),
             )
+            if _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
+                capability_plan.append(
+                    _deep_capability(
+                        "official_domain_discovery",
+                        ["exa-search"],
+                        "Use Exa for official-domain or low-noise supplemental docs discovery.",
+                    )
+                )
+                add_step("sq2", "exa-search", "official-domain docs source discovery", command_exa(f"{question} official docs"), next_filename("exa.json"))
 
         if recency_requirement != "none" or locale_domain_scope == "china":
             sub_id = f"sq{len(decomposition) + 1}"
@@ -516,18 +542,31 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
                 decomposition.append(_deep_subquestion(sub_id, sub_question, reason, caps))
             if not has_capability("cross_validation"):
                 capability_plan.append(
-                    _deep_capability("cross_validation", ["search", "exa-search"], "Compare independent sources before final claims.")
+                    _deep_capability("cross_validation", ["search"], "Compare independent sources before final claims; supplemental tools depend on intent.")
                 )
-            if budget == "deep":
+            if budget == "deep" and _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
                 add_step("sq3", "exa-search", "low-noise evidence for tradeoffs and risks", command_exa(f"{question} risks limitations comparison"), next_filename("exa.json"))
 
-        if cross_validation_need == "high" and not any(step["tool"] == "exa-search" for step in steps):
+        if cross_validation_need == "high":
             if not has_capability("cross_validation"):
                 capability_plan.append(
-                    _deep_capability("cross_validation", ["search", "exa-search"], "Compare independent sources before final claims.")
+                    _deep_capability("cross_validation", ["search"], "Compare independent sources before final claims; supplemental tools depend on intent.")
                 )
             target_subquestion = decomposition[-1]["id"] if decomposition else "sq1"
-            add_step(target_subquestion, "exa-search", "low-noise cross-source discovery", command_exa(question), next_filename("exa.json"))
+            cross_validation_tools = next((item["tools"] for item in capability_plan if item.get("capability") == "cross_validation"), [])
+            if recency_requirement != "none" or locale_domain_scope == "china" or zh_current_intent:
+                if "zhipu-search" not in cross_validation_tools:
+                    cross_validation_tools.append("zhipu-search")
+                if not any(step["tool"] == "zhipu-search" for step in steps):
+                    add_step(target_subquestion, "zhipu-search", "current or locale-specific cross-source discovery", command_zhipu(question), next_filename("zhipu.json"))
+            elif docs_intent:
+                if "context7-library" not in cross_validation_tools:
+                    cross_validation_tools.extend(["context7-library", "context7-docs"])
+            elif _contains_any(question, DEEP_EXA_DISCOVERY_KEYWORDS):
+                if "exa-search" not in cross_validation_tools:
+                    cross_validation_tools.append("exa-search")
+                if not any(step["tool"] == "exa-search" for step in steps):
+                    add_step(target_subquestion, "exa-search", "official-domain or low-noise cross-source discovery", command_exa(question), next_filename("exa.json"))
 
         capability_plan.append(_deep_capability("page_evidence", ["fetch"], "Fetch key URLs before claim-level conclusions."))
         add_step("sq1" if len(decomposition) == 1 else decomposition[-1]["id"], "fetch", "fetch key URLs before final claims", command_fetch(), next_filename("fetch.md"))
@@ -615,12 +654,12 @@ def get_capability_status() -> dict[str, Any]:
             "configured": [
                 name
                 for name, enabled in [
-                    ("exa", bool(config.exa_api_key)),
                     ("context7", bool(config.context7_api_key)),
+                    ("exa", bool(config.exa_api_key)),
                 ]
                 if enabled
             ],
-            "fallback_chain": ["exa", "context7"],
+            "fallback_chain": ["context7", "exa"],
         },
         "web_fetch": {
             "configured": [
@@ -915,10 +954,10 @@ async def _run_docs_search_fallback(
     provider_filter = _parse_provider_filter(providers)
     attempts: list[dict] = []
     configured: list[str] = []
-    if config.exa_api_key:
-        configured.append("exa")
     if config.context7_api_key:
         configured.append("context7")
+    if config.exa_api_key:
+        configured.append("exa")
     if provider_filter is not None:
         configured = [p for p in configured if p in provider_filter]
     if fallback == "off":
@@ -1977,7 +2016,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             "ok": True,
         },
         "web_search": {"configured": ["zhipu"], "fallback_chain": ["zhipu", "tavily", "firecrawl"], "ok": True},
-        "docs_search": {"configured": ["exa"], "fallback_chain": ["exa", "context7"], "ok": True},
+        "docs_search": {"configured": ["context7"], "fallback_chain": ["context7", "exa"], "ok": True},
         "web_fetch": {"configured": ["tavily"], "fallback_chain": ["tavily", "firecrawl"], "ok": True},
         "vertical_search": {"configured": [], "fallback_chain": ["anysearch"], "ok": False, "experimental": True},
     }
@@ -1994,7 +2033,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "standard",
         {
             **minimum_status,
-            "docs_search": {"configured": [], "fallback_chain": ["exa", "context7"], "ok": False},
+            "docs_search": {"configured": [], "fallback_chain": ["context7", "exa"], "ok": False},
         },
     )
     cases.append(
@@ -2027,10 +2066,10 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
     cases.append(_case("web_fetch fallback tavily_to_firecrawl", _fallback_used(attempts), {"provider_attempts": attempts}))
 
     docs_attempts = [
-        _attempt("docs_search", "exa", "empty", time.time()),
-        _attempt("docs_search", "context7", "ok", time.time(), result_count=1),
+        _attempt("docs_search", "context7", "empty", time.time()),
+        _attempt("docs_search", "exa", "ok", time.time(), result_count=1),
     ]
-    cases.append(_case("docs_search fallback exa_to_context7", _fallback_used(docs_attempts), {"provider_attempts": docs_attempts}))
+    cases.append(_case("docs_search fallback context7_to_exa", _fallback_used(docs_attempts), {"provider_attempts": docs_attempts}))
 
     general_route = {
         "docs_intent": _is_docs_intent("today AI news"),
@@ -2112,6 +2151,8 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             and market_plan["preflight"]["executed_by_deep_command"] is False
             and market_plan["evidence_policy"] == "fetch_before_claim"
             and "search" in market_tools
+            and "zhipu-search" in market_tools
+            and "exa-search" not in market_tools
             and "fetch" in market_tools
             and market_tools <= deep_allowed_tools,
             {"research_plan": market_plan},
@@ -2124,7 +2165,8 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         _case(
             "deep_research docs api prompt uses docs capabilities",
             docs_plan["intent_signals"]["docs_api_intent"]
-            and {"exa-search", "context7-library", "context7-docs", "fetch"} <= docs_tools
+            and {"context7-library", "context7-docs", "fetch"} <= docs_tools
+            and "exa-search" not in docs_tools
             and docs_tools <= deep_allowed_tools,
             {"research_plan": docs_plan},
         )
@@ -2137,6 +2179,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             claim_plan["evidence_policy"] == "fetch_before_claim"
             and claim_plan["intent_signals"]["cross_validation_need"] == "high"
             and any(step["tool"] == "fetch" for step in claim_plan["steps"])
+            and not any(step["tool"] == "exa-search" for step in claim_plan["steps"])
             and claim_plan["gap_check"]["unsupported_claim_action"] == "downgrade_to_unverified_candidate",
             {"research_plan": claim_plan},
         )
@@ -2166,7 +2209,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "standard",
         {
             **minimum_status,
-            "docs_search": {"configured": [], "fallback_chain": ["exa", "context7"], "ok": False},
+            "docs_search": {"configured": [], "fallback_chain": ["context7", "exa"], "ok": False},
             "web_fetch": {"configured": [], "fallback_chain": ["tavily", "firecrawl"], "ok": False},
         },
     )

@@ -181,10 +181,12 @@ Each `steps[]` item must include `id`, `subquestion_id`, `tool`, `purpose`, `com
 Capability boundaries:
 
 - `search`: broad discovery and synthesis through `main_search`; use returned `routing_decision`, `provider_attempts`, `fallback_used`, and `source_warning` as orchestration signals, not as claim proof.
-- `exa-search`: low-noise source discovery for official docs, APIs, papers, product pages, known domains, trusted pages, and recency-filtered source search.
+- `zhipu-search`: Chinese, domestic, current, policy/regulatory, announcement, and China-local source discovery.
+- `context7-library` and `context7-docs`: library, SDK, API, framework, and documentation intent. Prefer Context7 before Exa for docs/API questions.
+- `exa-search`: low-noise source discovery for official domains, papers, product pages, known domains, and trusted pages. It is not the default second hop for every high-risk or verification task.
 - `exa-similar`: adjacent-source discovery when a known reliable URL is available.
-- `zhipu-search`: Chinese, domestic, current, or domain-filtered source discovery.
-- `context7-library` and `context7-docs`: library, SDK, API, framework, and documentation intent only.
+- `search --extra-sources N`: Tavily/Firecrawl horizontal candidate collection for breadth. Treat those candidates as discovery until fetched.
+- `anysearch-domains` and `anysearch-search`: experimental vertical search. Inspect domains first, then search a selected domain; do not insert it into the default fallback chain.
 - `fetch`: page-content evidence. Key claims require fetched page text under `fetch_before_claim`.
 - `map`: site structure exploration before many fetches from one site; not claim evidence by itself.
 
@@ -193,7 +195,7 @@ Default Deep Research orchestration:
 1. Run `smart-search doctor --format json` as preflight when configuration is uncertain.
 2. Call `smart-search deep "question" --format json` to generate `intent_signals`, `decomposition`, and `capability_plan` instead of selecting a fixed topic recipe.
 3. Use planned `smart-search search ... --validation balanced --extra-sources 1..3` steps for broad discovery.
-4. Add planned `exa-search`, `exa-similar`, `zhipu-search`, `context7-library`, `context7-docs`, or `map` only when the capability boundary matches the intent.
+4. Add planned `zhipu-search` for Chinese/current/domestic topics, `context7-library` plus `context7-docs` for docs/API/library topics, `exa-search` for official/trusted-domain or paper discovery, `exa-similar` for URL-neighbor discovery, or `map` only when the capability boundary matches the intent.
 5. Use `fetch` for key URLs before making claim-level statements.
 6. Run `gap_check`: fetch missing evidence for key claims or downgrade them to unverified candidates.
 
@@ -231,6 +233,22 @@ Interactive setup behavior:
   explicitly, and `--skills-root PATH` is an advanced override for the
   user-level install root used in portable installs or tests. Normal users
   should omit it.
+- `smart-search skills status --targets codex,claude,cursor,hermes --format json`
+  compares bundled skill files with installed user-level skill directories.
+  Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and
+  `error`. It reports target paths, bundled file count, installed file count,
+  hashes, hash match flags, missing files, stale files, and extra files. It
+  must not write or delete files.
+- `smart-search skills update --targets codex,claude,cursor,hermes --format json`
+  overwrites the managed bundled `smart-search-cli` files for selected
+  targets. `smart-search skills update --all --format json` selects every
+  target id. This daily sync path must not change provider keys, run setup
+  prompts, create Trellis files, create hooks, create agents, create commands,
+  or delete leftover files. Extra installed files are only reported by
+  `skills status`.
+- `smart-search setup --non-interactive --install-skills codex` remains the
+  first-time setup compatibility path. Prefer `skills status` and
+  `skills update` for routine global skill synchronization after CLI upgrades.
 - Required groups are `main_search`, `docs_search`, and `web_fetch`; `web_search` is optional reinforcement.
 - `--lang zh|en` skips the language question.
 - `--advanced` shows low-level config keys one by one for compatibility with older setup behavior and does not show the skill prompt unless `--install-skills` is explicit.
@@ -274,7 +292,7 @@ Search timeout output uses `ok=false`, `error_type=network_error`, includes the 
 - Same-capability fallback is allowed; cross-capability fallback is not. Context7 is not used for unrelated broad web queries, and page extraction providers are not used as docs search providers.
 - `main_search`: xAI Responses first for Grok/xAI, then OpenAI-compatible answer fallback when that peer provider is separately configured and `--fallback auto` is active.
 - `web_search`: Zhipu first when routed in, then Tavily / Firecrawl source search when configured.
-- `docs_search`: Exa first, then Context7.
+- `docs_search`: Context7 first for library/API/docs intent, then Exa for official-domain, paper, product-page, trusted-site, or low-noise supplemental discovery.
 - Fetch capability: Tavily first, then Firecrawl.
 - `search` calls Tavily and/or Firecrawl only when `--extra-sources` is greater than 0.
 - If both Tavily and Firecrawl are configured, `search --extra-sources N` gives about 60% of extra source slots to Tavily and the remainder to Firecrawl.

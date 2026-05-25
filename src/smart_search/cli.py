@@ -17,6 +17,7 @@ from .skill_installer import (
     SkillInstallError,
     install_skill_targets,
     parse_skill_targets,
+    status_skill_targets,
 )
 
 
@@ -44,6 +45,7 @@ COMMAND_ALIASES = {
     "doctor": ["d"],
     "model": ["mdl"],
     "setup": ["init"],
+    "skills": ["skill"],
     "config": ["cfg"],
     "regression": ["reg"],
 }
@@ -58,6 +60,11 @@ CONFIG_COMMAND_ALIASES = {
 MODEL_COMMAND_ALIASES = {
     "set": ["s"],
     "current": ["cur", "c"],
+}
+
+SKILLS_COMMAND_ALIASES = {
+    "status": ["st"],
+    "update": ["up"],
 }
 
 
@@ -576,6 +583,39 @@ def _format_setup_markdown(data: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _format_skills_markdown(data: dict[str, Any]) -> str:
+    lines = ["# Smart Search Skills", "", f"Status: {_status_label(data.get('ok'))}"]
+    if data.get("root"):
+        lines.append(f"Root: `{data.get('root')}`")
+    if data.get("skill"):
+        lines.append(f"Skill: `{data.get('skill')}`")
+    if data.get("bundled_files") is not None:
+        lines.append(f"Bundled files: {data.get('bundled_files')}")
+
+    targets = data.get("targets") or data.get("installed") or []
+    if targets:
+        rows = []
+        for item in targets:
+            rows.append(
+                [
+                    item.get("target", ""),
+                    item.get("status", "installed"),
+                    item.get("files", item.get("installed_files", "")),
+                    item.get("installed_files", ""),
+                    _yes_no(item.get("hash_match")),
+                    len(item.get("extra_files") or []),
+                    item.get("path", ""),
+                ]
+            )
+        lines.extend(["", "## Targets"])
+        lines.extend(_markdown_table(["Target", "Status", "Files", "Installed", "Hash match", "Extra", "Path"], rows))
+    if data.get("failed"):
+        lines.extend(["", "## Failed"])
+        lines.extend(_markdown_table(["Target", "Path", "Error"], [[item.get("target"), item.get("path"), item.get("error")] for item in data.get("failed", [])]))
+    lines.extend(_error_lines(data))
+    return "\n".join(lines).strip() + "\n"
+
+
 def _format_markdown(command: str, data: dict[str, Any]) -> str:
     if command == "search":
         if not data.get("ok", False) and (data.get("error") or data.get("error_type")):
@@ -668,6 +708,8 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
         return _format_model_markdown(data)
     if command == "setup":
         return _format_setup_markdown(data)
+    if command == "skills":
+        return _format_skills_markdown(data)
     titles = {
         "map": "Site Map",
         "exa-search": "Exa Search",
@@ -773,6 +815,15 @@ def _format_content(command: str, data: dict[str, Any]) -> str:
             return f"Setup {_status_label(data.get('ok'))}: {_error_summary(data)}\n"
         saved = data.get("saved") or data.get("values") or {}
         return f"Setup {_status_label(data.get('ok'))}: {len(saved)} values saved\n"
+    if command == "skills":
+        if data.get("error"):
+            return f"Skills {_status_label(data.get('ok'))}: {_error_summary(data)}\n"
+        targets = data.get("targets") or data.get("installed") or []
+        counts = data.get("status_counts") or {}
+        if counts:
+            summary = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
+            return f"Skills {_status_label(data.get('ok'))}: {summary}\n"
+        return f"Skills {_status_label(data.get('ok'))}: {len(targets)} targets\n"
     if command in {
         "map",
         "exa-search",
@@ -999,12 +1050,12 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
             "configured": [
                 provider
                 for provider, configured in [
-                    ("exa", has("EXA_API_KEY")),
                     ("context7", has("CONTEXT7_API_KEY")),
+                    ("exa", has("EXA_API_KEY")),
                 ]
                 if configured
             ],
-            "fallback_chain": ["exa", "context7"],
+            "fallback_chain": ["context7", "exa"],
         },
         "web_fetch": {
             "configured": [
@@ -1347,12 +1398,12 @@ def _prompt_main_search(values: dict[str, str], current: dict[str, str], lang: s
 
 def _prompt_docs_search(values: dict[str, str], current: dict[str, str], lang: str) -> None:
     status = _setup_status_from_values(_merge_setup_values(current, values))
-    default_selected = status["docs_search"]["configured"] or ["exa"]
+    default_selected = status["docs_search"]["configured"] or ["context7"]
     _write_stderr(
         _t(
             lang,
-            "\n[2/3 必选] docs_search 文档搜索\n用途: 查官方文档、SDK、API、框架和库说明。\n推荐: Exa 通用性更强；Context7 更专注文档。\n",
-            "\n[2/3 Required] docs_search documentation search\nPurpose: official docs, SDKs, APIs, frameworks, and library references.\nRecommended: Exa is broader; Context7 is more documentation-focused.\n",
+            "\n[2/3 必选] docs_search 文档搜索\n用途: 查官方文档、SDK、API、框架和库说明。\n推荐: 文档/API/库优先 Context7；官方域名、论文和低噪声发现再配 Exa。\n",
+            "\n[2/3 Required] docs_search documentation search\nPurpose: official docs, SDKs, APIs, frameworks, and library references.\nRecommended: Context7 for docs/API/library intent; Exa for official domains, papers, and low-noise discovery.\n",
         )
     )
     selected = _prompt_provider_multi_select(
@@ -1626,12 +1677,12 @@ def _write_setup_examples(lang: str) -> None:
             lang,
             "\n不知道怎么填: 先配齐 main_search + docs_search + web_fetch。\n"
             "  main_search: xAI Responses，或 OpenAI-compatible（示例: https://api.openai.com/v1）\n"
-            "  docs_search: Exa；没有 Exa 就选 Context7。\n"
+            "  docs_search: 文档/API 优先 Context7；官方域名、论文和低噪声发现再配 Exa。\n"
             "  web_fetch: Tavily 官方地址是 https://api.tavily.com；号池填 https://<host>/api/tavily。\n"
             "  key 都填你自己控制台里的；Zhipu / Firecrawl 可以之后再补。\n",
             "\nIf unsure: first configure main_search + docs_search + web_fetch.\n"
             "  main_search: xAI Responses, or OpenAI-compatible (example: https://api.openai.com/v1)\n"
-            "  docs_search: Exa, or Context7 if you do not have Exa.\n"
+            "  docs_search: Context7 for docs/API first; add Exa for official domains, papers, and low-noise discovery.\n"
             "  web_fetch: official Tavily endpoint is https://api.tavily.com; pooled endpoints use https://<host>/api/tavily.\n"
             "  Use keys from your own provider consoles. Zhipu / Firecrawl can be added later.\n",
         )
@@ -1852,6 +1903,40 @@ def _run_config(args: argparse.Namespace) -> int:
     else:
         data = {"ok": False, "error_type": "parameter_error", "error": "Unknown config command"}
     return _print_result("config", data, args.format, args.output)
+
+
+def _skill_targets_from_args(args: argparse.Namespace) -> list[str]:
+    if getattr(args, "all", False):
+        return [target.target_id for target in SKILL_TARGETS]
+    raw = getattr(args, "targets", "") or ""
+    if raw:
+        return parse_skill_targets(raw)
+    return list(DEFAULT_SKILL_TARGET_IDS)
+
+
+def _run_skills(args: argparse.Namespace) -> int:
+    try:
+        target_ids = _skill_targets_from_args(args)
+    except SkillInstallError as e:
+        data = {"ok": False, "error_type": "parameter_error", "error": str(e), "selected": []}
+        return _print_result("skills", data, args.format, args.output)
+
+    if args.skills_command == "status":
+        try:
+            data = status_skill_targets(target_ids, project_root=args.skills_root)
+        except SkillInstallError as e:
+            data = {"ok": False, "error_type": "runtime_error", "error": str(e), "selected": target_ids}
+        return _print_result("skills", data, args.format, args.output)
+
+    if args.skills_command == "update":
+        try:
+            data = install_skill_targets(target_ids, project_root=args.skills_root)
+        except SkillInstallError as e:
+            data = {"ok": False, "error_type": "runtime_error", "error": str(e), "selected": target_ids}
+        return _print_result("skills", data, args.format, args.output)
+
+    data = {"ok": False, "error_type": "parameter_error", "error": "Unknown skills command", "selected": target_ids}
+    return _print_result("skills", data, args.format, args.output)
 
 
 def _run_setup(args: argparse.Namespace) -> int:
@@ -2149,6 +2234,42 @@ def build_parser() -> argparse.ArgumentParser:
     model_current.set_defaults(model_command="current")
     _add_format_args(model_current)
 
+    skills_parser = sub.add_parser(
+        "skills",
+        aliases=COMMAND_ALIASES["skills"],
+        help="Inspect or update installed smart-search-cli skills.",
+    )
+    skills_parser.set_defaults(command="skills")
+    skills_sub = skills_parser.add_subparsers(dest="skills_command", required=True, parser_class=SmartSearchArgumentParser)
+    skills_status = skills_sub.add_parser("status", aliases=SKILLS_COMMAND_ALIASES["status"], help="Compare bundled and installed skill files.")
+    skills_status.set_defaults(skills_command="status")
+    skills_status.add_argument(
+        "--targets",
+        default=",".join(DEFAULT_SKILL_TARGET_IDS),
+        help="Comma-separated AI tool targets, e.g. codex,claude,cursor,hermes.",
+    )
+    skills_status.add_argument("--all", action="store_true", help="Check every known skill target.")
+    skills_status.add_argument(
+        "--skills-root",
+        default="",
+        help="Advanced override for the user-level skill root; defaults to the current user's home directory.",
+    )
+    _add_format_args(skills_status)
+    skills_update = skills_sub.add_parser("update", aliases=SKILLS_COMMAND_ALIASES["update"], help="Overwrite selected installed skill files with bundled assets.")
+    skills_update.set_defaults(skills_command="update")
+    skills_update.add_argument(
+        "--targets",
+        default=",".join(DEFAULT_SKILL_TARGET_IDS),
+        help="Comma-separated AI tool targets, e.g. codex,claude,cursor,hermes.",
+    )
+    skills_update.add_argument("--all", action="store_true", help="Update every known skill target.")
+    skills_update.add_argument(
+        "--skills-root",
+        default="",
+        help="Advanced override for the user-level skill root; defaults to the current user's home directory.",
+    )
+    _add_format_args(skills_update)
+
     setup_parser = sub.add_parser(
         "setup", aliases=COMMAND_ALIASES["setup"], help="Interactively save local provider configuration."
     )
@@ -2228,6 +2349,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_regression()
         if args.command == "setup":
             return _run_setup(args)
+        if args.command == "skills":
+            return _run_skills(args)
         if args.command == "config":
             return _run_config(args)
         if args.command == "model":

@@ -166,6 +166,8 @@ def test_deep_research_plan_current_market_is_offline_and_fetch_before_claim(mon
     assert result["preflight"]["executed_by_deep_command"] is False
     tools = {step["tool"] for step in result["steps"]}
     assert {"search", "fetch"} <= tools
+    assert "zhipu-search" in tools
+    assert "exa-search" not in tools
     assert tools <= service.DEEP_ALLOWED_TOOLS
     assert all(step["subquestion_id"] for step in result["steps"])
 
@@ -180,9 +182,23 @@ def test_deep_research_plan_complex_docs_query_has_decomposition():
     assert result["difficulty"] == "high"
     assert result["intent_signals"]["docs_api_intent"] is True
     assert len(result["decomposition"]) >= 4
-    tools = {step["tool"] for step in result["steps"]}
-    assert {"search", "exa-search", "context7-library", "context7-docs", "fetch"} <= tools
+    tools = [step["tool"] for step in result["steps"]]
+    assert {"search", "context7-library", "context7-docs", "fetch"} <= set(tools)
+    assert "exa-search" not in tools
     assert result["gap_check"]["unsupported_claim_action"] == "downgrade_to_unverified_candidate"
+
+
+def test_deep_research_plan_docs_official_domain_can_add_exa_after_context7():
+    result = service.build_deep_research_plan(
+        "React useEffect 官方 API docs",
+        budget="deep",
+        evidence_dir="C:/tmp/smart-search-evidence/test-react-official",
+    )
+
+    tools = [step["tool"] for step in result["steps"]]
+    assert {"context7-library", "context7-docs", "exa-search"} <= set(tools)
+    assert tools.index("context7-library") < tools.index("exa-search")
+    assert tools.index("context7-docs") < tools.index("exa-search")
 
 
 def test_deep_research_plan_url_first_starts_with_fetch():
@@ -196,6 +212,18 @@ def test_deep_research_plan_url_first_starts_with_fetch():
     assert result["steps"][0]["tool"] == "fetch"
     assert "https://example.com/source" in result["steps"][0]["command"]
     assert any(step["tool"] == "exa-similar" for step in result["steps"])
+
+
+def test_deep_research_claim_verification_does_not_unconditionally_add_exa():
+    result = service.build_deep_research_plan(
+        "帮我核验这个说法是真是假",
+        evidence_dir="C:/tmp/smart-search-evidence/test-claim",
+    )
+
+    tools = {step["tool"] for step in result["steps"]}
+    assert result["intent_signals"]["cross_validation_need"] == "high"
+    assert {"search", "fetch"} <= tools
+    assert "exa-search" not in tools
 
 
 def test_deep_research_quick_budget_keeps_fetch_and_valid_subquestion_links():
@@ -585,8 +613,8 @@ async def test_docs_query_routes_docs_without_current_web_search(monkeypatch):
         return "Docs answer."
 
     async def fake_docs_search(query, providers="auto", fallback="auto"):
-        return [{"url": "https://docs.example.com", "provider": "exa"}], [
-            {"capability": "docs_search", "provider": "exa", "status": "ok", "elapsed_ms": 1, "result_count": 1}
+        return [{"url": "context7:/facebook/react", "provider": "context7"}], [
+            {"capability": "docs_search", "provider": "context7", "status": "ok", "elapsed_ms": 1, "result_count": 1}
         ]
 
     async def should_not_run_web_search(query, count=5, providers="auto", fallback="auto"):

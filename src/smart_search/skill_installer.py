@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from hashlib import sha256
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,114 @@ def _load_skill_files(source_root: Path | None = None) -> list[tuple[str, bytes]
             return files
 
     raise SkillInstallError("Bundled smart-search-cli skill files were not found.")
+
+
+def _skill_digest(files: list[tuple[str, bytes]]) -> str:
+    digest = sha256()
+    for rel_path, content in sorted(files, key=lambda item: item[0]):
+        digest.update(rel_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _target_installed_files(path: Path) -> list[tuple[str, bytes]]:
+    if not path.is_dir():
+        return []
+    return _iter_filesystem_files(path)
+
+
+def status_skill_targets(
+    target_ids: list[str],
+    *,
+    project_root: str | Path | None = None,
+    source_root: str | Path | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root).expanduser().resolve() if project_root else Path.home().expanduser().resolve()
+    selected = [SKILL_TARGET_BY_ID[target_id] for target_id in target_ids]
+    source = Path(source_root).expanduser().resolve() if source_root is not None else None
+    source_files = _load_skill_files(source)
+    source_by_path = {rel_path: content for rel_path, content in source_files}
+    bundled_digest = _skill_digest(source_files)
+    targets: list[dict[str, Any]] = []
+
+    for target in selected:
+        dest = root / Path(target.skill_relative_path)
+        item: dict[str, Any] = {
+            "target": target.target_id,
+            "label": target.label,
+            "path": str(dest),
+            "status": "missing",
+            "files": len(source_files),
+            "installed_files": 0,
+            "bundled_hash": bundled_digest,
+            "installed_hash": "",
+            "hash_match": False,
+            "managed_hash_match": False,
+            "extra_files": [],
+            "missing_files": sorted(source_by_path),
+            "stale_files": [],
+        }
+        try:
+            installed_files = _target_installed_files(dest)
+            installed_by_path = {rel_path: content for rel_path, content in installed_files}
+            item["installed_files"] = len(installed_files)
+            if not dest.exists():
+                targets.append(item)
+                continue
+            if not dest.is_dir():
+                item["status"] = "error"
+                item["error"] = "Installed skill path exists but is not a directory."
+                targets.append(item)
+                continue
+
+            installed_digest = _skill_digest(installed_files)
+            extra_files = sorted(rel_path for rel_path in installed_by_path if rel_path not in source_by_path)
+            missing_files = sorted(rel_path for rel_path in source_by_path if rel_path not in installed_by_path)
+            stale_files = sorted(
+                rel_path
+                for rel_path, content in source_by_path.items()
+                if rel_path in installed_by_path and installed_by_path[rel_path] != content
+            )
+            managed_hash_match = not missing_files and not stale_files
+            hash_match = managed_hash_match and not extra_files
+            item.update(
+                {
+                    "installed_hash": installed_digest if installed_files else "",
+                    "hash_match": hash_match,
+                    "managed_hash_match": managed_hash_match,
+                    "extra_files": extra_files,
+                    "missing_files": missing_files,
+                    "stale_files": stale_files,
+                }
+            )
+            if missing_files or stale_files:
+                item["status"] = "stale"
+            elif extra_files:
+                item["status"] = "extra_files"
+            else:
+                item["status"] = "up_to_date"
+        except OSError as e:
+            item["status"] = "error"
+            item["error"] = str(e)
+        targets.append(item)
+
+    status_counts: dict[str, int] = {}
+    for item in targets:
+        status = str(item.get("status", "error"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return {
+        "ok": not any(item.get("status") == "error" for item in targets),
+        "root": str(root),
+        "selected": [target.target_id for target in selected],
+        "skill": SKILL_NAME,
+        "bundled_files": len(source_files),
+        "bundled_hash": bundled_digest,
+        "targets": targets,
+        "status_counts": status_counts,
+    }
 
 
 def install_skill_targets(

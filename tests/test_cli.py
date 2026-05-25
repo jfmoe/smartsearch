@@ -61,6 +61,9 @@ def test_each_subcommand_help_exits_successfully(capsys):
         ["deep", "--help"],
         ["smoke", "--help"],
         ["doctor", "--help"],
+        ["skills", "--help"],
+        ["skills", "status", "--help"],
+        ["skills", "update", "--help"],
         ["setup", "--help"],
         ["config", "--help"],
         ["config", "path", "--help"],
@@ -109,6 +112,7 @@ def test_command_aliases_parse_to_canonical_commands():
         (["dr", "query"], "deep"),
         (["sm"], "smoke"),
         (["d"], "doctor"),
+        (["skill", "status"], "skills"),
         (["init", "--non-interactive"], "setup"),
         (["cfg", "ls"], "config"),
         (["mdl", "cur"], "model"),
@@ -136,6 +140,13 @@ def test_command_aliases_parse_to_canonical_commands():
     ]
     for argv, model_command in model_cases:
         assert parser.parse_args(argv).model_command == model_command
+
+    skills_cases = [
+        (["skills", "st"], "status"),
+        (["skills", "up"], "update"),
+    ]
+    for argv, skills_command in skills_cases:
+        assert parser.parse_args(argv).skills_command == skills_command
 
 
 def test_search_help_exposes_timeout(capsys):
@@ -285,7 +296,7 @@ def test_doctor_markdown_outputs_human_health_report(monkeypatch, capsys):
             "minimum_profile_missing": [],
             "capability_status": {
                 "main_search": {"ok": True, "configured": ["openai-compatible"], "fallback_chain": ["xai-responses", "openai-compatible"]},
-                "docs_search": {"ok": True, "configured": ["exa"], "fallback_chain": ["exa", "context7"]},
+                "docs_search": {"ok": True, "configured": ["context7"], "fallback_chain": ["context7", "exa"]},
                 "web_fetch": {"ok": True, "configured": ["tavily"], "fallback_chain": ["tavily", "firecrawl"]},
             },
             "main_search_connection_tests": {
@@ -1042,6 +1053,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
         ("deep", ["deep", "query", "--format", "markdown"]),
         ("smoke", ["smoke", "--format", "markdown"]),
         ("doctor", ["doctor", "--format", "markdown"]),
+        ("skills-status", ["skills", "status", "--targets", "codex", "--format", "markdown"]),
         ("config-path", ["config", "path", "--format", "markdown"]),
         ("config-list", ["config", "list", "--format", "markdown"]),
         ("config-set", ["config", "set", "XAI_MODEL", "grok", "--format", "markdown"]),
@@ -1064,6 +1076,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
             "deep": {"ok": True, "mode": "deep_research", "question": "q", "difficulty": "standard", "evidence_policy": "fetch_before_claim"},
             "smoke": {"ok": True, "mode": "mock", "failed_cases": [], "cases": [{"name": "case", "ok": True}]},
             "doctor": {"ok": True, "config_status": "ok", "minimum_profile_ok": True},
+            "skills": {"ok": True, "targets": [{"target": "codex", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
             "config": {"ok": True, "config_file": "C:/tmp/config.json", "values": {"XAI_MODEL": "grok"}},
             "model": {"ok": True, "xai_model": "grok"},
         }[command]
@@ -1078,6 +1091,7 @@ def test_non_content_commands_have_non_empty_content_fallback():
         "smoke": {"ok": True, "mode": "mock", "cases": [], "failed_cases": []},
         "config": {"ok": True, "config_file": "C:/tmp/config.json"},
         "model": {"ok": True, "xai_model": "grok"},
+        "skills": {"ok": True, "targets": [{"target": "codex", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
         "exa-search": {"ok": True, "results": [{"title": "Example", "url": "https://example.com"}]},
         "anysearch-search": {"ok": True, "provider": "anysearch", "results": [{"title": "AnySearch", "url": ""}]},
     }
@@ -1085,6 +1099,49 @@ def test_non_content_commands_have_non_empty_content_fallback():
         rendered = cli._render(command, data, "content")
         assert rendered.strip(), command
         assert not rendered.lstrip().startswith("{"), command
+
+
+def test_skills_status_reports_missing_and_update_writes_target(tmp_path, capsys):
+    status_code = cli.main(["skills", "status", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
+    status = json.loads(capsys.readouterr().out)
+
+    assert status_code == cli.EXIT_OK
+    assert status["selected"] == ["codex"]
+    assert status["targets"][0]["status"] == "missing"
+    assert status["targets"][0]["hash_match"] is False
+
+    update_code = cli.main(["skills", "update", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
+    update = json.loads(capsys.readouterr().out)
+
+    assert update_code == cli.EXIT_OK
+    assert update["installed_count"] == 1
+    assert (tmp_path / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
+
+    status_code = cli.main(["skills", "status", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
+    status = json.loads(capsys.readouterr().out)
+
+    assert status_code == cli.EXIT_OK
+    assert status["targets"][0]["status"] == "up_to_date"
+    assert status["targets"][0]["hash_match"] is True
+
+
+def test_skills_update_all_selects_every_target(tmp_path, capsys):
+    code = cli.main(["skills", "update", "--all", "--skills-root", str(tmp_path), "--format", "json"])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert data["installed_count"] == len(skill_installer.SKILL_TARGETS)
+    assert set(data["selected"]) == {target.target_id for target in skill_installer.SKILL_TARGETS}
+
+
+def test_skills_unknown_target_returns_parameter_error(tmp_path, capsys):
+    code = cli.main(["skills", "status", "--targets", "unknown", "--skills-root", str(tmp_path), "--format", "json"])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_PARAMETER_ERROR
+    assert data["error_type"] == "parameter_error"
+    assert "Unknown skill target" in data["error"]
+    assert not (tmp_path / ".codex" / "skills" / "smart-search-cli").exists()
 
 
 def test_setup_non_interactive_saves_values(monkeypatch, capsys):
@@ -1343,6 +1400,28 @@ def test_skill_installer_parse_aliases_and_all(tmp_path):
     assert (tmp_path / "project" / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
 
 
+def test_skill_installer_status_detects_stale_and_extra_files(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "SKILL.md").write_text("new", encoding="utf-8")
+    root = tmp_path / "project"
+    dest = root / ".codex" / "skills" / "smart-search-cli"
+    dest.mkdir(parents=True)
+
+    (dest / "SKILL.md").write_text("old", encoding="utf-8")
+    stale = skill_installer.status_skill_targets(["codex"], project_root=root, source_root=source)
+    assert stale["targets"][0]["status"] == "stale"
+    assert stale["targets"][0]["stale_files"] == ["SKILL.md"]
+
+    (dest / "SKILL.md").write_text("new", encoding="utf-8")
+    (dest / "OLD.md").write_text("old leftover", encoding="utf-8")
+    extra = skill_installer.status_skill_targets(["codex"], project_root=root, source_root=source)
+    assert extra["targets"][0]["status"] == "extra_files"
+    assert extra["targets"][0]["extra_files"] == ["OLD.md"]
+    assert extra["targets"][0]["managed_hash_match"] is True
+    assert extra["targets"][0]["hash_match"] is False
+
+
 def test_tavily_url_normalization_cases():
     cases = {
         "pool.example.com": "https://pool.example.com/api/tavily",
@@ -1418,8 +1497,8 @@ def test_zhipu_prompt_allows_custom_search_engine(monkeypatch):
 
 def test_setup_guided_zh_groups_minimum_capabilities(monkeypatch, capsys):
     saved = {}
-    answers = iter(["xai", "", "exa", "tavily", "", "n", "n"])
-    secrets = iter(["xai-test-secret", "exa-test-secret", "tavily-test-secret"])
+    answers = iter(["xai", "", "context7", "tavily", "", "n", "n"])
+    secrets = iter(["xai-test-secret", "context7-test-secret", "tavily-test-secret"])
 
     def fake_config_set(key, value):
         saved[key] = value
@@ -1438,7 +1517,7 @@ def test_setup_guided_zh_groups_minimum_capabilities(monkeypatch, capsys):
     assert code == cli.EXIT_OK
     assert saved == {
         "XAI_API_KEY": "xai-test-secret",
-        "EXA_API_KEY": "exa-test-secret",
+        "CONTEXT7_API_KEY": "context7-test-secret",
         "TAVILY_API_URL": "https://api.tavily.com",
         "TAVILY_API_KEY": "tavily-test-secret",
     }

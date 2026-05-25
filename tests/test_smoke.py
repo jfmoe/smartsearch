@@ -19,7 +19,7 @@ async def test_mock_smoke_passes():
 
     assert result["ok"] is True
     assert result["failed_cases"] == []
-    assert any(case["name"] == "docs_search fallback exa_to_context7" for case in result["cases"])
+    assert any(case["name"] == "docs_search fallback context7_to_exa" for case in result["cases"])
     assert any(case["name"] == "deep_research explicit planner simple current prompt uses capability plan" for case in result["cases"])
 
 
@@ -77,7 +77,7 @@ async def test_live_smoke_treats_provider_failure_as_degraded_when_fallback_exis
             "capability_status": {
                 "main_search": {"configured": ["xai-responses"], "fallback_chain": ["xai-responses", "openai-compatible"], "ok": True},
                 "web_search": {"configured": ["zhipu", "tavily"], "fallback_chain": ["zhipu", "tavily", "firecrawl"], "ok": True},
-                "docs_search": {"configured": ["exa"], "fallback_chain": ["exa", "context7"], "ok": True},
+                "docs_search": {"configured": ["context7"], "fallback_chain": ["context7", "exa"], "ok": True},
                 "web_fetch": {"configured": ["tavily"], "fallback_chain": ["tavily", "firecrawl"], "ok": True},
             },
             "zhipu_connection_test": {"status": "warning", "message": "HTTP 429: Too Many Requests"},
@@ -130,22 +130,49 @@ async def test_search_docs_intent_uses_docs_fallback(monkeypatch):
     async def fake_search(self, query, platform="", ctx=None):
         return "Answer."
 
-    async def fake_exa(*args, **kwargs):
-        return {"ok": False, "error": "empty", "results": []}
-
     async def fake_context7(name, query=""):
         return {"ok": True, "results": [{"id": "/facebook/react", "title": "React", "description": "UI"}], "total": 1}
 
     monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
-    monkeypatch.setattr(service, "exa_search", fake_exa)
     monkeypatch.setattr(service, "context7_library", fake_context7)
 
     result = await service.search("React useEffect API docs", validation="balanced")
 
     assert result["ok"] is True
     assert result["routing_decision"]["docs_intent"] is True
-    assert result["fallback_used"] is True
+    assert result["fallback_used"] is False
     assert "context7" in result["providers_used"]
+    assert "exa" not in result["providers_used"]
+
+
+@pytest.mark.asyncio
+async def test_search_docs_intent_falls_back_to_exa_after_context7_empty(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-secret")
+    monkeypatch.setenv("CONTEXT7_API_KEY", "ctx-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+
+    async def fake_search(self, query, platform="", ctx=None):
+        return "Answer."
+
+    async def fake_context7(name, query=""):
+        return {"ok": True, "results": [], "total": 0}
+
+    async def fake_exa(*args, **kwargs):
+        return {"ok": True, "results": [{"url": "https://docs.example.com", "title": "Docs"}]}
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(service, "context7_library", fake_context7)
+    monkeypatch.setattr(service, "exa_search", fake_exa)
+
+    result = await service.search("React useEffect API docs", validation="balanced")
+
+    assert result["ok"] is True
+    assert result["fallback_used"] is True
+    providers = [attempt["provider"] for attempt in result["provider_attempts"] if attempt["capability"] == "docs_search"]
+    assert providers == ["context7", "exa"]
+    assert "exa" in result["providers_used"]
 
 
 @pytest.mark.asyncio
