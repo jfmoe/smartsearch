@@ -35,7 +35,7 @@ SKILL_TARGETS: tuple[SkillTarget, ...] = (
     SkillTarget("qoder", "Qoder", ".qoder/skills"),
     SkillTarget("codebuddy", "CodeBuddy", ".codebuddy/skills"),
     SkillTarget("droid", "Factory Droid", ".factory/skills"),
-    SkillTarget("pi", "Pi Agent", ".pi/skills"),
+    SkillTarget("pi", "Pi Agent", ".pi/agent/skills"),
     SkillTarget("kilo", "Kilo CLI", ".kilocode/skills"),
     SkillTarget("antigravity", "Antigravity", ".agent/skills"),
     SkillTarget("windsurf", "Windsurf", ".windsurf/skills"),

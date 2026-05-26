@@ -279,6 +279,15 @@ Provider endpoint setup:
 
 Search timeout output uses `ok=false`, `error_type=network_error`, includes the timeout seconds in `error`, keeps `query`, `content`, `sources`, `sources_count`, `primary_sources`, `primary_sources_count`, `extra_sources`, and `extra_sources_count`, and exits with code `4`.
 
+Agent timeout handling contract:
+
+- A `search` result with `ok=false`, `error_type=network_error`, and an `error` message containing `timed out` is retryable at the orchestration layer.
+- Agents should retry up to 3 total attempts with `smart-search search ... --timeout 180 --extra-sources 1 --format json --output PATH`, waiting about 5 seconds between attempts and stopping as soon as the saved JSON has `"ok": true`.
+- Agents must use the CLI `--timeout` option, not a shell-level `timeout` wrapper, so timeout failures remain structured JSON with exit code `4`.
+- `SMART_SEARCH_RETRY_*` settings are not the contract for this path; the visible CLI result is the contract.
+- After repeated timeout failures, agents should switch to source-first fallback: `exa-search` for broad source discovery, `exa-search --include-domains` for likely official domains, then `fetch` key URLs before claim-level conclusions.
+- Final answers assembled through that fallback should explicitly label the evidence mode, for example `source_mode: "fallback"` or equivalent prose.
+
 ## Provider Routing
 
 - `search` builds `main_search` from peer providers only: `XAI_API_KEY` registers official xAI Responses, while `OPENAI_COMPATIBLE_API_URL` + `OPENAI_COMPATIBLE_API_KEY` registers OpenAI-compatible Chat Completions.

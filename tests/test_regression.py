@@ -134,6 +134,43 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
         assert marker in packaged_contract
 
 
+def test_search_timeout_retry_policy_is_distributable():
+    public_text = _read_skill_tree(PUBLIC_SKILL_DIR)
+    packaged_text = _read_skill_tree(PACKAGED_SKILL_DIR)
+    public_contract = (PUBLIC_SKILL_DIR / "references" / "cli-contract.md").read_text(encoding="utf-8")
+    packaged_contract = (PACKAGED_SKILL_DIR / "references" / "cli-contract.md").read_text(encoding="utf-8")
+
+    skill_markers = [
+        "Timeout Retry Policy",
+        "error_type: \"network_error\"",
+        "Retry up to 3 total attempts with `--timeout 180`",
+        "`--extra-sources 1` during retry attempts",
+        "Always use the CLI's `--timeout` option",
+        "Do not wrap `smart-search` in a shell-level `timeout` command",
+        "Do not rely on `SMART_SEARCH_RETRY_*` settings",
+        "fall back to source-first evidence",
+        "Run `exa-search` with the original query",
+        "`fetch` the top 1-2 relevant URLs",
+        "source_mode: \"fallback\"",
+    ]
+    contract_markers = [
+        "Agent timeout handling contract",
+        "`smart-search search ... --timeout 180 --extra-sources 1 --format json --output PATH`",
+        "not a shell-level `timeout` wrapper",
+        "`SMART_SEARCH_RETRY_*` settings are not the contract",
+        "switch to source-first fallback",
+        "`exa-search --include-domains`",
+        "`source_mode: \"fallback\"`",
+    ]
+
+    for marker in skill_markers:
+        assert marker in public_text
+        assert marker in packaged_text
+    for marker in contract_markers:
+        assert marker in public_contract
+        assert marker in packaged_contract
+
+
 def test_deep_research_readme_documents_capability_orchestration():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
