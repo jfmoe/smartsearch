@@ -13,10 +13,11 @@ from .logger import log_info
 from .providers.anysearch import AnySearchProvider
 from .providers.context7 import Context7Provider
 from .providers.exa import ExaSearchProvider
-from .providers.openai_compatible import OpenAICompatibleSearchProvider
+from .providers.openai_compatible import OpenAICompatibleSearchProvider, get_local_time_info
 from .providers.xai_responses import XAIResponsesSearchProvider
 from .providers.zhipu import ZhipuWebSearchProvider
 from .sources import merge_sources, new_session_id, split_answer_and_sources
+from .utils import search_prompt
 
 
 _AVAILABLE_MODELS_CACHE: dict[tuple[str, str], list[str]] = {}
@@ -28,6 +29,7 @@ SOURCE_PROVENANCE_WARNING = (
 MINIMUM_PROFILE_ERROR = (
     "最低配置不满足：必须至少配置 main_search、docs_search、web_fetch 三类能力各一个 provider。"
 )
+OPENAI_COMPATIBLE_DIAGNOSE_COMMAND = "smart-search diagnose openai-compatible --format markdown"
 DOCS_INTENT_KEYWORDS = {
     "api",
     "sdk",
@@ -1687,7 +1689,7 @@ async def _test_primary_chat_completion(api_url: str, api_key: str, model: str) 
     async with httpx.AsyncClient(timeout=20.0) as client:
         response = await client.post(
             chat_url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
             json={
                 "model": model,
                 "messages": [{"role": "user", "content": "Reply with exactly: ok"}],
@@ -1696,9 +1698,283 @@ async def _test_primary_chat_completion(api_url: str, api_key: str, model: str) 
             },
         )
         response_time = _elapsed_ms(start)
+        content_type = response.headers.get("content-type", "")
         if response.status_code != 200:
-            return {"status": "warning", "message": f"HTTP {response.status_code}: {response.text[:100]}", "response_time_ms": response_time}
-        return {"status": "ok", "message": f"聊天接口可用 (HTTP {response.status_code})", "response_time_ms": response_time}
+            return {
+                "status": "warning",
+                "message": f"HTTP {response.status_code}: {response.text[:100]}",
+                "response_time_ms": response_time,
+                "http_status": response.status_code,
+                "content_type": content_type,
+                "has_content": bool(response.text.strip()),
+            }
+        return {
+            "status": "ok",
+            "message": f"聊天接口可用 (HTTP {response.status_code})",
+            "response_time_ms": response_time,
+            "http_status": response.status_code,
+            "content_type": content_type,
+            "has_content": bool(response.text.strip()),
+        }
+
+
+def _diagnose_check_result(
+    *,
+    name: str,
+    status: str,
+    message: str,
+    start: float,
+    http_status: int | None = None,
+    content_type: str = "",
+    has_content: bool = False,
+    stream: bool | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "name": name,
+        "status": status,
+        "message": message,
+        "response_time_ms": _elapsed_ms(start),
+        "has_content": has_content,
+    }
+    if http_status is not None:
+        result["http_status"] = http_status
+    if content_type:
+        result["content_type"] = content_type
+    if stream is not None:
+        result["stream"] = stream
+    return result
+
+
+def _openai_compatible_diagnosis(quick: dict[str, Any], no_stream: dict[str, Any], stream: dict[str, Any]) -> tuple[bool, str, str]:
+    quick_ok = quick.get("status") == "ok"
+    no_stream_ok = no_stream.get("status") == "ok"
+    stream_ok = stream.get("status") == "ok"
+    search_timeout = no_stream.get("status") == "timeout" or stream.get("status") == "timeout"
+
+    if no_stream_ok and stream_ok:
+        return (
+            True,
+            "OpenAI-compatible 主链路正常。",
+            "真实 search 形态的 stream=false 和 stream=true 都能返回。若用户仍卡住，更可能是调用方、PATH、超时设置或上游偶发波动。",
+        )
+    if stream_ok and not no_stream_ok:
+        return (
+            False,
+            "非流式请求不稳定，流式请求可用。",
+            "建议设置 `OPENAI_COMPATIBLE_STREAM=true`，或临时使用 `smart-search search ... --stream`。",
+        )
+    if no_stream_ok and not stream_ok:
+        return (
+            False,
+            "流式请求不稳定，非流式请求可用。",
+            "建议设置 `OPENAI_COMPATIBLE_STREAM=false`，或临时使用 `smart-search search ... --no-stream`。",
+        )
+    if quick_ok and search_timeout:
+        return (
+            False,
+            "小请求能通，但真实 search 形态超时。",
+            "这通常是上游模型或中转站在处理 smart-search 的完整 prompt 时卡住；建议换模型/中转，或把本诊断报告贴给维护者。",
+        )
+    if quick_ok:
+        return (
+            False,
+            "小请求能通，但真实 search 形态失败。",
+            "这更像上游模型/中转站对 smart-search 请求形态不兼容；建议换模型/中转，或把本诊断报告贴给维护者。",
+        )
+    return (
+        False,
+        "OpenAI-compatible 基础请求不可用。",
+        "请先检查 API URL、API key、模型名和网络；修好后再运行本诊断命令。",
+    )
+
+
+async def _probe_openai_compatible_search_shape(
+    api_url: str,
+    api_key: str,
+    model: str,
+    *,
+    stream: bool,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    name = "真实 search 请求 (stream=true)" if stream else "真实 search 请求 (stream=false)"
+    start = time.time()
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": search_prompt},
+            {"role": "user", "content": get_local_time_info() + "\nping"},
+        ],
+        "stream": stream,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "smart-search/diagnose",
+    }
+    timeout = httpx.Timeout(connect=6.0, read=timeout_seconds, write=10.0, pool=None)
+    try:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
+            if stream:
+                async with client.stream(
+                    "POST",
+                    f"{api_url.rstrip('/')}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    content_type = response.headers.get("content-type", "")
+                    response.raise_for_status()
+                    has_content = False
+                    async for line in response.aiter_lines():
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        if not stripped.startswith("data:"):
+                            continue
+                        if stripped in ("data: [DONE]", "data:[DONE]"):
+                            continue
+                        try:
+                            data = json.loads(stripped[5:].lstrip())
+                        except json.JSONDecodeError:
+                            continue
+                        choices = data.get("choices", []) if isinstance(data, dict) else []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        if isinstance(delta, dict) and str(delta.get("content") or "").strip():
+                            has_content = True
+                            break
+                        message = choices[0].get("message", {})
+                        if isinstance(message, dict) and str(message.get("content") or "").strip():
+                            has_content = True
+                            break
+                    status = "ok" if has_content else "empty"
+                    message = f"HTTP {response.status_code}; {'收到流式内容' if has_content else '未收到内容'}"
+                    return _diagnose_check_result(
+                        name=name,
+                        status=status,
+                        message=message,
+                        start=start,
+                        http_status=response.status_code,
+                        content_type=content_type,
+                        has_content=has_content,
+                        stream=stream,
+                    )
+
+            response = await client.post(
+                f"{api_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            content_type = response.headers.get("content-type", "")
+            response.raise_for_status()
+            content = await OpenAICompatibleSearchProvider(api_url, api_key, model, stream=False)._parse_completion_response(response)
+            has_content = bool(content.strip())
+            status = "ok" if has_content else "empty"
+            message = f"HTTP {response.status_code}; {'收到内容' if has_content else '返回为空'}"
+            return _diagnose_check_result(
+                name=name,
+                status=status,
+                message=message,
+                start=start,
+                http_status=response.status_code,
+                content_type=content_type,
+                has_content=has_content,
+                stream=stream,
+            )
+    except httpx.TimeoutException as e:
+        return _diagnose_check_result(name=name, status="timeout", message=f"请求超时: {e}", start=start, stream=stream)
+    except httpx.HTTPStatusError as e:
+        body = e.response.text[:200] if e.response is not None else str(e)
+        status_code = e.response.status_code if e.response is not None else None
+        content_type = e.response.headers.get("content-type", "") if e.response is not None else ""
+        return _diagnose_check_result(
+            name=name,
+            status="warning",
+            message=f"HTTP {status_code}: {body}",
+            start=start,
+            http_status=status_code,
+            content_type=content_type,
+            stream=stream,
+        )
+    except httpx.RequestError as e:
+        return _diagnose_check_result(name=name, status="error", message=f"网络错误: {e}", start=start, stream=stream)
+    except Exception as e:
+        return _diagnose_check_result(name=name, status="error", message=f"运行错误: {e}", start=start, stream=stream)
+
+
+async def diagnose_openai_compatible(timeout_seconds: float = 30.0) -> dict[str, Any]:
+    start = time.time()
+    api_url = config.openai_compatible_api_url
+    api_key = config.openai_compatible_api_key
+    model = config.openai_compatible_model
+    info = config.config_path_info()
+    result: dict[str, Any] = {
+        "ok": False,
+        "provider": "openai-compatible",
+        "api_url": api_url or "未配置",
+        "api_key": config._mask_api_key(api_key) if api_key else "未配置",
+        "model": model,
+        "configured_stream": config.openai_compatible_stream,
+        "timeout_seconds": timeout_seconds,
+        "config_file": info.get("config_file", ""),
+        "config_dir_source": info.get("config_dir_source", ""),
+        "checks": [],
+        "next_command": OPENAI_COMPATIBLE_DIAGNOSE_COMMAND,
+    }
+    missing = []
+    if not api_url:
+        missing.append("OPENAI_COMPATIBLE_API_URL")
+    if not api_key:
+        missing.append("OPENAI_COMPATIBLE_API_KEY")
+    if missing:
+        result.update(
+            {
+                "error_type": "config_error",
+                "error": "缺少 OpenAI-compatible 配置: " + ", ".join(missing),
+                "summary": "OpenAI-compatible 配置不完整。",
+                "recommendation": "请先运行 `smart-search setup`，或用 `smart-search config set` 填好缺失项。",
+                "missing": missing,
+                "elapsed_ms": _elapsed_ms(start),
+            }
+        )
+        return result
+
+    try:
+        quick = await _test_primary_chat_completion(api_url, api_key, model)
+    except httpx.TimeoutException as e:
+        quick = {"status": "timeout", "message": f"轻量 chat 请求超时: {e}"}
+    except httpx.RequestError as e:
+        quick = {"status": "error", "message": f"轻量 chat 网络错误: {e}"}
+    except Exception as e:
+        quick = {"status": "error", "message": f"轻量 chat 运行错误: {e}"}
+    quick_check = {
+        "name": "轻量 chat 请求",
+        "status": quick.get("status", "error"),
+        "message": quick.get("message", ""),
+        "response_time_ms": quick.get("response_time_ms"),
+        "http_status": quick.get("http_status"),
+        "content_type": quick.get("content_type", ""),
+        "has_content": bool(quick.get("has_content", quick.get("status") == "ok")),
+    }
+    result["checks"].append(quick_check)
+    no_stream = await _probe_openai_compatible_search_shape(api_url, api_key, model, stream=False, timeout_seconds=timeout_seconds)
+    result["checks"].append(no_stream)
+    stream = await _probe_openai_compatible_search_shape(api_url, api_key, model, stream=True, timeout_seconds=timeout_seconds)
+    result["checks"].append(stream)
+
+    ok, summary, recommendation = _openai_compatible_diagnosis(quick_check, no_stream, stream)
+    result.update(
+        {
+            "ok": ok,
+            "error_type": "" if ok else "network_error",
+            "error": "" if ok else summary,
+            "summary": summary,
+            "recommendation": recommendation,
+            "elapsed_ms": _elapsed_ms(start),
+        }
+    )
+    return result
 
 
 async def _test_primary_connection(api_url: str, api_key: str, model: str) -> dict[str, Any]:

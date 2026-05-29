@@ -64,25 +64,32 @@ smart-search setup
 smart-search doctor --format json
 ```
 
-2. Run a normal live search:
+2. If OpenAI-compatible `search` hangs or times out, generate the short troubleshooting report:
+
+```powershell
+smart-search doctor --format markdown
+smart-search diagnose openai-compatible --format markdown
+```
+
+3. Run a normal live search:
 
 ```powershell
 smart-search search "today's important AI news" --validation balanced --extra-sources 2 --format json
 ```
 
-3. Fetch exact page evidence:
+4. Fetch exact page evidence:
 
 ```powershell
 smart-search fetch "https://example.com/source" --format markdown --output evidence.md
 ```
 
-4. Plan Deep Research:
+5. Plan Deep Research:
 
 ```powershell
 smart-search deep "Deep research recent Bitcoin market movement" --budget standard --format json
 ```
 
-5. Install the skill for AI tools when setup prompts you, or explicitly:
+6. Install the skill for AI tools when setup prompts you, or explicitly:
 
 ```powershell
 smart-search setup --non-interactive --install-skills codex,claude,cursor,hermes
@@ -92,7 +99,7 @@ Skill installation writes the bundled `smart-search-cli` skill into user-level t
 `~/.codex/skills`, `~/.claude/skills`, `~/.cursor/skills`, and `~/.hermes/skills`. It does not initialize
 Trellis, hooks, agents, or commands. `--skills-root PATH` is only an advanced override for portable or test installs.
 
-6. After upgrading the CLI, refresh the installed global skill:
+7. After upgrading the CLI, refresh the installed global skill:
 
 ```powershell
 smart-search skills status --targets codex --format json
@@ -279,6 +286,7 @@ Provider timeouts:
 | `context7-library` | `c7`, `ctx7` | Resolve Context7 library candidates |
 | `context7-docs` | `c7d`, `c7docs`, `ctx7-docs` | Fetch Context7 docs |
 | `doctor` | `d` | Masked config and connectivity check |
+| `diagnose` | `diag` | Focused OpenAI-compatible troubleshooting report |
 | `setup` | `init` | Interactive or scripted setup |
 | `config` | `cfg` | Local config read/write |
 | `model` | `mdl` | Show explicit provider model settings; use `config set XAI_MODEL` or `OPENAI_COMPATIBLE_MODEL` to change them |
@@ -302,6 +310,7 @@ smart-search exa-similar "https://example.com/source" --num-results 5 --format j
 smart-search fetch "https://example.com/source" --format markdown --output page.md
 smart-search map "https://docs.example.com" --instructions "Find API reference pages" --max-depth 1 --limit 50 --format json
 smart-search doctor --format markdown
+smart-search diagnose openai-compatible --format markdown
 smart-search smoke --mock --format json
 smart-search regression
 ```
@@ -319,6 +328,7 @@ Use Markdown for human-readable reports, detailed diagnostics, source lists, and
 
 ```powershell
 smart-search doctor --format markdown
+smart-search diagnose openai-compatible --format markdown
 smart-search smoke --mock --format markdown
 smart-search exa-search "OpenAI Responses API documentation" --format markdown
 smart-search fetch "https://example.com" --format markdown
@@ -331,7 +341,7 @@ smart-search search "nba report" --format content
 smart-search doctor --format content
 ```
 
-`content` is intentionally brief. Use `doctor --format markdown` for human troubleshooting and `doctor --format json` for the complete machine-readable contract.
+`content` is intentionally brief. Use `doctor --format markdown` for general human troubleshooting, `diagnose openai-compatible --format markdown` for OpenAI-compatible search hangs/timeouts, and JSON formats for complete machine-readable contracts.
 
 Save multi-source evidence under a stable folder:
 
@@ -356,6 +366,15 @@ smart-search setup
 smart-search config list --format json
 smart-search doctor --format markdown
 ```
+
+If OpenAI-compatible `search` hangs or times out after `doctor` passes:
+
+```powershell
+smart-search doctor --format markdown
+smart-search diagnose openai-compatible --format markdown
+```
+
+The diagnose report masks the API key and says whether the problem is missing config, the upstream/relay hanging on the real Smart Search prompt, or a stream/no-stream compatibility mismatch.
 
 If search is slow:
 

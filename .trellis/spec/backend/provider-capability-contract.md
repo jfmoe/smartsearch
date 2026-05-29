@@ -31,6 +31,9 @@ smart-search search QUERY
   [--format json|markdown|content]
 
 smart-search doctor --format json|markdown|content
+smart-search diagnose openai-compatible
+  [--timeout SECONDS]
+  [--format json|markdown]
 smart-search setup
   [--lang zh|en]
   [--advanced]
@@ -79,6 +82,7 @@ validate_minimum_profile() -> dict[str, Any]
 search(query, platform="", model="", extra_sources=0,
        validation="", fallback="", providers="auto") -> dict[str, Any]
 doctor() -> dict[str, Any]
+diagnose_openai_compatible(timeout_seconds=30.0) -> dict[str, Any]
 smoke(mode="mock") -> dict[str, Any]
 ```
 
@@ -338,6 +342,16 @@ Output contracts:
   main provider id.
 - `doctor().primary_connection_test` is a backward-compatible alias for the
   first configured main provider only.
+- `diagnose openai-compatible` is the beginner-facing focused report for
+  OpenAI-compatible Chat Completions search hangs/timeouts. It must default to
+  Markdown, support JSON, mask API keys, report base URL/model/stream/config
+  path, run a lightweight chat check, then probe real Smart Search search-shape
+  requests with `stream=false` and `stream=true`.
+- Each `diagnose openai-compatible` check must report status, elapsed time,
+  HTTP status when available, content type when available, and whether response
+  content was observed. The summary must be plain language: missing config,
+  quick chat ok but real search timeout, stream-only works, no-stream-only
+  works, both fail, or both real search shapes work.
 - On Windows, the default config file is `%LOCALAPPDATA%\smart-search\config.json`.
   Linux/macOS default to `~/.config/smart-search/config.json`.
   `SMART_SEARCH_CONFIG_DIR` remains an advanced override. Earlier Windows
@@ -636,6 +650,15 @@ When this contract changes, add or update tests that assert:
   `--no-stream` overrides config for one search invocation;
 - streaming response parsing concatenates SSE delta content, ignores `[DONE]`,
   and returns an empty string for an empty stream;
+- `diagnose openai-compatible` reports missing config clearly, masks API keys,
+  distinguishes quick-chat success plus real-search timeout from total
+  provider failure, recommends `OPENAI_COMPATIBLE_STREAM=true` when only stream
+  works, recommends `OPENAI_COMPATIBLE_STREAM=false` when only no-stream works,
+  and marks both real search shapes working as a normal Smart Search main
+  path;
+- `search` CLI timeout results include provider/model/stream context when
+  available plus the next diagnostic command
+  `smart-search diagnose openai-compatible --format markdown`;
 - AnySearch config keys are listed, settable, masked where secret, and optional
   for the `standard` minimum profile;
 - AnySearch capability status is `vertical_search`, `experimental=true`, and

@@ -62,6 +62,8 @@ def test_each_subcommand_help_exits_successfully(capsys):
         ["deep", "--help"],
         ["smoke", "--help"],
         ["doctor", "--help"],
+        ["diagnose", "--help"],
+        ["diagnose", "openai-compatible", "--help"],
         ["skills", "--help"],
         ["skills", "status", "--help"],
         ["skills", "update", "--help"],
@@ -113,6 +115,7 @@ def test_command_aliases_parse_to_canonical_commands():
         (["dr", "query"], "deep"),
         (["sm"], "smoke"),
         (["d"], "doctor"),
+        (["diag", "openai-compatible"], "diagnose"),
         (["skill", "status"], "skills"),
         (["init", "--non-interactive"], "setup"),
         (["cfg", "ls"], "config"),
@@ -160,6 +163,61 @@ def test_search_help_exposes_timeout(capsys):
     assert "--timeout SECONDS" in out
     assert "--stream" in out
     assert "--no-stream" in out
+
+
+def test_diagnose_openai_compatible_defaults_to_markdown(monkeypatch, capsys):
+    async def fake_diagnose(timeout_seconds=30.0):
+        return {
+            "ok": False,
+            "provider": "openai-compatible",
+            "summary": "小请求能通，但真实 search 形态超时。",
+            "recommendation": "建议换模型/中转，或把本诊断报告贴给维护者。",
+            "api_url": "https://relay.example.com/v1",
+            "api_key": "sk-T********cret",
+            "model": "relay-model",
+            "configured_stream": True,
+            "timeout_seconds": timeout_seconds,
+            "config_file": "C:/tmp/config.json",
+            "config_dir_source": "environment",
+            "checks": [
+                {"name": "轻量 chat 请求", "status": "ok", "response_time_ms": 10.0, "has_content": True, "message": "chat ok"},
+                {
+                    "name": "真实 search 请求 (stream=false)",
+                    "status": "timeout",
+                    "response_time_ms": 30000.0,
+                    "has_content": False,
+                    "message": "请求超时",
+                },
+            ],
+            "next_command": "smart-search diagnose openai-compatible --format markdown",
+            "error_type": "network_error",
+            "error": "小请求能通，但真实 search 形态超时。",
+        }
+
+    monkeypatch.setattr(cli.service, "diagnose_openai_compatible", fake_diagnose)
+
+    code = cli.main(["diagnose", "openai-compatible"])
+
+    out = capsys.readouterr().out
+    assert code == cli.EXIT_NETWORK_ERROR
+    assert out.startswith("# Smart Search Diagnose")
+    assert "小请求能通" in out
+    assert "真实 search 请求" in out
+    assert "smart-search diagnose openai-compatible --format markdown" in out
+
+
+def test_diagnose_openai_compatible_json(monkeypatch, capsys):
+    async def fake_diagnose(timeout_seconds=30.0):
+        return {"ok": True, "provider": "openai-compatible", "summary": "ok", "timeout_seconds": timeout_seconds}
+
+    monkeypatch.setattr(cli.service, "diagnose_openai_compatible", fake_diagnose)
+
+    code = cli.main(["diagnose", "openai-compatible", "--timeout", "5", "--format", "json"])
+
+    data = json.loads(capsys.readouterr().out)
+    assert code == cli.EXIT_OK
+    assert data["provider"] == "openai-compatible"
+    assert data["timeout_seconds"] == 5
 
 
 def test_search_outputs_json_and_file(monkeypatch, capsys):
@@ -527,7 +585,10 @@ def test_doctor_alias_uses_canonical_command(monkeypatch, capsys):
 
 
 def test_search_timeout_respects_requested_format_and_exit_4(monkeypatch, capsys):
-    async def slow_search(query, platform="", model="", extra_sources=0, validation="", fallback="", providers="auto"):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "relay-timeout-model")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_STREAM", "true")
+
+    async def slow_search(query, **kwargs):
         await asyncio.sleep(1)
         return {
             "ok": True,
@@ -548,6 +609,9 @@ def test_search_timeout_respects_requested_format_and_exit_4(monkeypatch, capsys
     assert "network_error" in out.out
     assert "0.01" in out.out
     assert "seconds" in out.out
+    assert "relay-timeout-model" in out.out
+    assert "Stream: YES" in out.out
+    assert "smart-search diagnose openai-compatible --format markdown" in out.out
 
     code = cli.main(["search", "slow query", "--timeout", "0.01", "--format", "content"])
     assert code == cli.EXIT_NETWORK_ERROR
@@ -564,6 +628,10 @@ def test_search_timeout_respects_requested_format_and_exit_4(monkeypatch, capsys
     assert data["extra_sources"] == []
     assert data["extra_sources_count"] == 0
     assert data["source_warning"] == ""
+    assert data["diagnose_command"] == "smart-search diagnose openai-compatible --format markdown"
+    assert data["model"] == "relay-timeout-model"
+    assert data["stream"] is True
+    assert data["recommendation"]
 
 
 def test_markdown_search_includes_sources(monkeypatch, capsys):
@@ -1054,6 +1122,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
         ("deep", ["deep", "query", "--format", "markdown"]),
         ("smoke", ["smoke", "--format", "markdown"]),
         ("doctor", ["doctor", "--format", "markdown"]),
+        ("diagnose", ["diagnose", "openai-compatible", "--format", "markdown"]),
         ("skills-status", ["skills", "status", "--targets", "codex", "--format", "markdown"]),
         ("config-path", ["config", "path", "--format", "markdown"]),
         ("config-list", ["config", "list", "--format", "markdown"]),
@@ -1077,6 +1146,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
             "deep": {"ok": True, "mode": "deep_research", "question": "q", "difficulty": "standard", "evidence_policy": "fetch_before_claim"},
             "smoke": {"ok": True, "mode": "mock", "failed_cases": [], "cases": [{"name": "case", "ok": True}]},
             "doctor": {"ok": True, "config_status": "ok", "minimum_profile_ok": True},
+            "diagnose": {"ok": True, "provider": "openai-compatible", "summary": "ok", "recommendation": "none"},
             "skills": {"ok": True, "targets": [{"target": "codex", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
             "config": {"ok": True, "config_file": "C:/tmp/config.json", "values": {"XAI_MODEL": "grok"}},
             "model": {"ok": True, "xai_model": "grok"},
@@ -1089,6 +1159,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
 def test_non_content_commands_have_non_empty_content_fallback():
     cases = {
         "doctor": {"ok": True, "config_status": "ok", "minimum_profile_ok": True},
+        "diagnose": {"ok": True, "provider": "openai-compatible", "summary": "ok", "recommendation": "none"},
         "smoke": {"ok": True, "mode": "mock", "cases": [], "failed_cases": []},
         "config": {"ok": True, "config_file": "C:/tmp/config.json"},
         "model": {"ok": True, "xai_model": "grok"},

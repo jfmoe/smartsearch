@@ -1045,6 +1045,128 @@ async def test_doctor_redacts_secret_and_reports_config_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_diagnose_openai_compatible_reports_missing_config(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+
+    result = await service.diagnose_openai_compatible()
+
+    assert result["ok"] is False
+    assert result["error_type"] == "config_error"
+    assert "OPENAI_COMPATIBLE_API_URL" in result["missing"]
+    assert "OPENAI_COMPATIBLE_API_KEY" in result["missing"]
+    assert result["summary"] == "OpenAI-compatible 配置不完整。"
+
+
+@pytest.mark.asyncio
+async def test_diagnose_openai_compatible_timeout_after_quick_chat(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+
+    async def fake_quick(api_url, api_key, model):
+        return {"status": "ok", "message": "chat ok", "response_time_ms": 12.0}
+
+    async def fake_probe(api_url, api_key, model, *, stream, timeout_seconds):
+        return {
+            "name": f"真实 search 请求 (stream={'true' if stream else 'false'})",
+            "status": "timeout",
+            "message": "请求超时",
+            "response_time_ms": timeout_seconds * 1000,
+            "has_content": False,
+            "stream": stream,
+        }
+
+    monkeypatch.setattr(service, "_test_primary_chat_completion", fake_quick)
+    monkeypatch.setattr(service, "_probe_openai_compatible_search_shape", fake_probe)
+
+    result = await service.diagnose_openai_compatible(timeout_seconds=3)
+    dumped = json.dumps(result, ensure_ascii=False)
+
+    assert result["ok"] is False
+    assert result["error_type"] == "network_error"
+    assert "真实 search 形态超时" in result["summary"]
+    assert "上游模型或中转站" in result["recommendation"]
+    assert "relay-test-secret" not in dumped
+    assert service.config._mask_api_key("relay-test-secret") in dumped
+
+
+@pytest.mark.asyncio
+async def test_diagnose_openai_compatible_recommends_stream_when_only_stream_works(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+
+    async def fake_quick(api_url, api_key, model):
+        return {"status": "ok", "message": "chat ok", "response_time_ms": 12.0}
+
+    async def fake_probe(api_url, api_key, model, *, stream, timeout_seconds):
+        return {
+            "name": "probe",
+            "status": "ok" if stream else "timeout",
+            "message": "ok" if stream else "timeout",
+            "response_time_ms": 1.0,
+            "has_content": stream,
+            "stream": stream,
+        }
+
+    monkeypatch.setattr(service, "_test_primary_chat_completion", fake_quick)
+    monkeypatch.setattr(service, "_probe_openai_compatible_search_shape", fake_probe)
+
+    result = await service.diagnose_openai_compatible()
+
+    assert result["ok"] is False
+    assert "流式请求可用" in result["summary"]
+    assert "OPENAI_COMPATIBLE_STREAM=true" in result["recommendation"]
+
+
+@pytest.mark.asyncio
+async def test_diagnose_openai_compatible_recommends_no_stream_when_stream_fails(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+
+    async def fake_quick(api_url, api_key, model):
+        return {"status": "ok", "message": "chat ok", "response_time_ms": 12.0}
+
+    async def fake_probe(api_url, api_key, model, *, stream, timeout_seconds):
+        return {
+            "name": "probe",
+            "status": "timeout" if stream else "ok",
+            "message": "timeout" if stream else "ok",
+            "response_time_ms": 1.0,
+            "has_content": not stream,
+            "stream": stream,
+        }
+
+    monkeypatch.setattr(service, "_test_primary_chat_completion", fake_quick)
+    monkeypatch.setattr(service, "_probe_openai_compatible_search_shape", fake_probe)
+
+    result = await service.diagnose_openai_compatible()
+
+    assert result["ok"] is False
+    assert "非流式请求可用" in result["summary"]
+    assert "OPENAI_COMPATIBLE_STREAM=false" in result["recommendation"]
+
+
+@pytest.mark.asyncio
+async def test_diagnose_openai_compatible_reports_ok_when_both_search_shapes_work(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+
+    async def fake_quick(api_url, api_key, model):
+        return {"status": "ok", "message": "chat ok", "response_time_ms": 12.0}
+
+    async def fake_probe(api_url, api_key, model, *, stream, timeout_seconds):
+        return {"name": "probe", "status": "ok", "message": "ok", "response_time_ms": 1.0, "has_content": True, "stream": stream}
+
+    monkeypatch.setattr(service, "_test_primary_chat_completion", fake_quick)
+    monkeypatch.setattr(service, "_probe_openai_compatible_search_shape", fake_probe)
+
+    result = await service.diagnose_openai_compatible()
+
+    assert result["ok"] is True
+    assert result["error_type"] == ""
+    assert "主链路正常" in result["summary"]
+
+
+@pytest.mark.asyncio
 async def test_doctor_reports_invalid_validation_config(monkeypatch):
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://api.example.com/v1")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-test-secret")

@@ -43,6 +43,7 @@ COMMAND_ALIASES = {
     "deep": ["dr"],
     "smoke": ["sm"],
     "doctor": ["d"],
+    "diagnose": ["diag"],
     "model": ["mdl"],
     "setup": ["init"],
     "skills": ["skill"],
@@ -146,8 +147,13 @@ def _format_seconds(seconds: float) -> str:
     return f"{seconds:g}"
 
 
-def _search_timeout_result(query: str, timeout: float) -> dict[str, Any]:
+def _search_timeout_result(query: str, timeout: float, search_kwargs: dict[str, Any] | None = None) -> dict[str, Any]:
     seconds = _format_seconds(timeout)
+    search_kwargs = search_kwargs or {}
+    stream = search_kwargs.get("stream")
+    if stream is None:
+        stream = service.config.openai_compatible_stream
+    model = search_kwargs.get("model") or service.config.openai_compatible_model
     return {
         "ok": False,
         "error_type": "network_error",
@@ -167,6 +173,11 @@ def _search_timeout_result(query: str, timeout: float) -> dict[str, Any]:
         "fallback_used": False,
         "validation_level": "",
         "timeout_seconds": timeout,
+        "provider": search_kwargs.get("providers", "auto"),
+        "model": model,
+        "stream": stream,
+        "diagnose_command": "smart-search diagnose openai-compatible --format markdown",
+        "recommendation": "Run `smart-search diagnose openai-compatible --format markdown` to check whether OpenAI-compatible stream/no-stream search requests are hanging upstream.",
     }
 
 
@@ -518,6 +529,46 @@ def _format_smoke_markdown(data: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _format_diagnose_markdown(data: dict[str, Any]) -> str:
+    lines = [
+        "# Smart Search Diagnose",
+        "",
+        f"Provider: `{data.get('provider', '')}`",
+        f"Status: {_status_label(data.get('ok'))}",
+        f"Summary: {data.get('summary', '-')}",
+        f"Recommendation: {data.get('recommendation', '-')}",
+        f"Config file: `{data.get('config_file', '')}`",
+        f"Config dir source: `{data.get('config_dir_source', '-')}`",
+        f"API URL: `{data.get('api_url', '')}`",
+        f"API key: `{data.get('api_key', '')}`",
+        f"Model: `{data.get('model', '')}`",
+        f"Configured stream: {_yes_no(data.get('configured_stream'))}",
+        f"Timeout: {_format_seconds(float(data.get('timeout_seconds', 0) or 0))} seconds",
+    ]
+    checks = data.get("checks") or []
+    if checks:
+        rows = []
+        for check in checks:
+            rows.append(
+                [
+                    check.get("name", ""),
+                    _status_label(check.get("status")),
+                    _latency_text(check.get("response_time_ms")),
+                    check.get("http_status", "-"),
+                    check.get("content_type", "-"),
+                    _yes_no(check.get("has_content")),
+                    check.get("message", ""),
+                ]
+            )
+        lines.extend(["", "## Checks"])
+        lines.extend(_markdown_table(["Check", "Status", "Latency", "HTTP", "Content-Type", "Has content", "Message"], rows))
+    if data.get("next_command"):
+        lines.extend(["", "## Next Command"])
+        lines.extend(_markdown_code_block(data.get("next_command")))
+    lines.extend(_error_lines(data))
+    return "\n".join(lines).strip() + "\n"
+
+
 def _format_config_markdown(data: dict[str, Any]) -> str:
     lines = ["# Smart Search Config", "", f"Status: {_status_label(data.get('ok'))}"]
     if data.get("config_file"):
@@ -622,6 +673,17 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
             lines = ["# Smart Search Search", ""]
             if data.get("query"):
                 lines.append(f"Query: `{data.get('query')}`")
+            if data.get("provider") is not None:
+                lines.append(f"Provider: `{data.get('provider')}`")
+            if data.get("model") is not None:
+                lines.append(f"Model: `{data.get('model')}`")
+            if data.get("stream") is not None:
+                lines.append(f"Stream: {_yes_no(data.get('stream'))}")
+            if data.get("recommendation"):
+                lines.extend(["", "## Recommendation", str(data.get("recommendation"))])
+            if data.get("diagnose_command"):
+                lines.extend(["", "## Next Command"])
+                lines.extend(_markdown_code_block(data.get("diagnose_command")))
             lines.extend(_error_lines(data))
             return "\n".join(lines).strip() + "\n"
         lines = [data.get("content", "")]
@@ -700,6 +762,8 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
         return "\n".join(lines).strip() + "\n"
     if command == "doctor":
         return _format_doctor_markdown(data)
+    if command == "diagnose":
+        return _format_diagnose_markdown(data)
     if command == "smoke":
         return _format_smoke_markdown(data)
     if command == "config":
@@ -773,6 +837,15 @@ def _format_content(command: str, data: dict[str, Any]) -> str:
         ]
         if capability_bits:
             lines.append("Capabilities: " + ", ".join(capability_bits))
+        if data.get("error"):
+            lines.append(f"Error: {_error_summary(data)}")
+        return "\n".join(lines).strip() + "\n"
+    if command == "diagnose":
+        lines = [
+            f"Diagnose {data.get('provider', '')} {_status_label(data.get('ok'))}: {data.get('summary', '')}".strip(),
+        ]
+        if data.get("recommendation"):
+            lines.append(f"Recommendation: {data.get('recommendation')}")
         if data.get("error"):
             lines.append(f"Error: {_error_summary(data)}")
         return "\n".join(lines).strip() + "\n"
@@ -1800,7 +1873,7 @@ async def _run_async(args: argparse.Namespace) -> int:
                 timeout=args.timeout,
             )
         except asyncio.TimeoutError:
-            data = _search_timeout_result(args.query, args.timeout)
+            data = _search_timeout_result(args.query, args.timeout, search_kwargs)
             return _print_result("search", data, args.format, args.output)
         return _print_result("search", data, args.format, args.output)
     if args.command == "fetch":
@@ -1878,6 +1951,16 @@ async def _run_async(args: argparse.Namespace) -> int:
     if args.command == "doctor":
         data = await service.doctor()
         return _print_result("doctor", data, args.format, args.output)
+    if args.command == "diagnose":
+        if args.diagnose_target == "openai-compatible":
+            data = await service.diagnose_openai_compatible(timeout_seconds=args.timeout)
+            return _print_result("diagnose", data, args.format, args.output)
+        return _print_result(
+            "diagnose",
+            {"ok": False, "error_type": "parameter_error", "error": f"Unknown diagnose target: {args.diagnose_target}"},
+            args.format,
+            args.output,
+        )
     return EXIT_PARAMETER_ERROR
 
 
@@ -2218,6 +2301,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor_parser.set_defaults(command="doctor")
     _add_format_args(doctor_parser)
+
+    diagnose_parser = sub.add_parser(
+        "diagnose",
+        aliases=COMMAND_ALIASES["diagnose"],
+        help="Run focused troubleshooting checks for a provider.",
+    )
+    diagnose_parser.set_defaults(command="diagnose")
+    diagnose_parser.add_argument("diagnose_target", choices=["openai-compatible"])
+    diagnose_parser.add_argument("--timeout", type=float, default=30, metavar="SECONDS", help="Per search-shape probe timeout in seconds.")
+    diagnose_parser.add_argument("--format", choices=["json", "markdown"], default="markdown")
+    diagnose_parser.add_argument("--output", default="", help="Write rendered output to a file.")
 
     model_parser = sub.add_parser(
         "model",
