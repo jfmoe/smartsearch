@@ -1589,7 +1589,7 @@ def test_setup_unknown_skill_target_returns_parameter_error(monkeypatch, capsys)
 
 def test_setup_guided_installs_tui_selected_skill_targets(monkeypatch, tmp_path, capsys):
     saved = {}
-    answers = iter(["skip", "skip", "skip", "n"])
+    answers = iter(["n", "n"])
     checkbox_calls = []
 
     def fake_checkbox(message, choices):
@@ -1777,7 +1777,7 @@ def test_zhipu_prompt_allows_custom_search_engine(monkeypatch):
 
 def test_setup_guided_zh_groups_minimum_capabilities(monkeypatch, capsys):
     saved = {}
-    answers = iter(["xai", "", "context7", "tavily", "", "n", "n"])
+    answers = iter(["xai", "", "context7", "tavily", "", "n", "n", "n"])
     secrets = iter(["xai-test-secret", "context7-test-secret", "tavily-test-secret"])
 
     def fake_config_set(key, value):
@@ -1816,7 +1816,7 @@ def test_setup_guided_zh_groups_minimum_capabilities(monkeypatch, capsys):
 
 def test_setup_guided_zhipu_optional_reinforcement_saves_url_and_engine(monkeypatch, capsys):
     saved = {}
-    answers = iter(["skip", "skip", "skip", "zhipu", "official", "search_pro_quark", "n"])
+    answers = iter(["skip", "skip", "skip", "zhipu", "official", "search_pro_quark", "n", "n"])
     secrets = iter(["zhipu-test-secret"])
 
     def fake_config_set(key, value):
@@ -1884,7 +1884,7 @@ def test_setup_guided_uses_tui_defaults_for_configured_providers(monkeypatch, ca
 
 def test_setup_guided_en_reports_missing_minimum(monkeypatch, capsys):
     saved = {}
-    answers = iter(["skip", "skip", "skip", "n", "n"])
+    answers = iter(["skip", "skip", "skip", "n", "n", "n"])
 
     def fake_config_set(key, value):
         saved[key] = value
@@ -1916,7 +1916,7 @@ def test_setup_guided_masks_configured_url_defaults(monkeypatch, capsys):
         "OPENAI_COMPATIBLE_API_URL": "https://private-relay.example.com/v1",
         "OPENAI_COMPATIBLE_API_KEY": "relay-old-secret",
     }
-    answers = iter(["openai", "", "", "", "skip", "skip", "n", "n"])
+    answers = iter(["openai", "", "", "", "skip", "skip", "n", "n", "n"])
     secrets = iter([""])
 
     monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "key": key, "value": "***"})
@@ -1935,7 +1935,7 @@ def test_setup_guided_masks_configured_url_defaults(monkeypatch, capsys):
 
 def test_setup_guided_main_search_can_save_openai_compatible_peer(monkeypatch, capsys):
     saved = {}
-    answers = iter(["openai", "https://relay.example.com/v1", "", "", "skip", "skip", "n", "n"])
+    answers = iter(["openai", "https://relay.example.com/v1", "", "", "skip", "skip", "n", "n", "n"])
     secrets = iter(["relay-test-secret"])
 
     def fake_config_set(key, value):
@@ -1965,7 +1965,7 @@ def test_setup_guided_main_search_can_save_openai_compatible_peer(monkeypatch, c
 
 def test_setup_guided_main_search_can_save_both_peer_providers(monkeypatch, capsys):
     saved = {}
-    answers = iter(["both", "", "https://relay.example.com/v1", "", "", "skip", "skip", "n", "n"])
+    answers = iter(["both", "", "https://relay.example.com/v1", "", "", "skip", "skip", "n", "n", "n"])
     secrets = iter(["xai-test-secret", "relay-test-secret"])
 
     def fake_config_set(key, value):
@@ -1991,9 +1991,63 @@ def test_setup_guided_main_search_can_save_both_peer_providers(monkeypatch, caps
     assert data["capability_status"]["main_search"]["fallback_chain"] == ["xai-responses", "openai-compatible"]
 
 
+def test_setup_guided_can_configure_intent_router(monkeypatch, capsys):
+    saved = {}
+    answers = iter([
+        "skip",
+        "skip",
+        "skip",
+        "skip",
+        "n",
+        "y",
+        "hybrid",
+        "y",
+        "https://api.example.com/v1/embeddings",
+        "embed-model",
+        "y",
+        "https://classifier.example.com/v1/chat/completions",
+        "intent-mini",
+        "30",
+    ])
+    secrets = iter(["embed-test-secret", "classifier-test-secret"])
+
+    def fake_config_set(key, value):
+        saved[key] = value
+        return {"ok": True, "key": key, "value": "***", "config_file": "C:/tmp/config.json"}
+
+    monkeypatch.setattr(cli.service, "config_set", fake_config_set)
+    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
+    monkeypatch.setattr(cli.service, "config_list", lambda show_secrets=False: {"ok": True, "values": saved.copy()})
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: next(secrets))
+
+    code = cli.main(["setup", "--skip-skills", "--lang", "en"])
+    captured = capsys.readouterr()
+
+    assert code == cli.EXIT_OK
+    assert json.loads(captured.out)["minimum_profile_ok"] is False
+    assert saved == {
+        "SMART_SEARCH_INTENT_ROUTER": "hybrid",
+        "INTENT_EMBEDDING_API_URL": "https://api.example.com/v1/embeddings",
+        "INTENT_EMBEDDING_API_KEY": "embed-test-secret",
+        "INTENT_EMBEDDING_MODEL": "embed-model",
+        "INTENT_CLASSIFIER_API_URL": "https://classifier.example.com/v1/chat/completions",
+        "INTENT_CLASSIFIER_API_KEY": "classifier-test-secret",
+        "INTENT_CLASSIFIER_MODEL": "intent-mini",
+        "INTENT_ROUTER_TIMEOUT_SECONDS": "30",
+    }
+    assert "smart intent routing" in captured.err
+    assert "embeddings semantic routing" in captured.err
+    assert "classifier model routing" in captured.err
+    assert "embed-test-secret" not in captured.out
+    assert "embed-test-secret" not in captured.err
+    assert "classifier-test-secret" not in captured.out
+    assert "classifier-test-secret" not in captured.err
+
+
 def test_setup_interactive_language_prompt(monkeypatch, capsys):
     saved = {}
-    answers = iter(["en", "skip", "skip", "skip", "n", "n"])
+    answers = iter(["en", "skip", "skip", "skip", "n", "n", "n"])
 
     monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "value": "***"})
     monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})

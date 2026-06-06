@@ -1865,6 +1865,123 @@ def _prompt_optional_enhancements(values: dict[str, str], current: dict[str, str
         )
 
 
+def _has_intent_router_config(values: dict[str, str]) -> bool:
+    keys = {
+        "SMART_SEARCH_INTENT_ROUTER",
+        "INTENT_EMBEDDING_API_URL",
+        "INTENT_EMBEDDING_API_KEY",
+        "INTENT_EMBEDDING_MODEL",
+        "INTENT_CLASSIFIER_API_URL",
+        "INTENT_CLASSIFIER_API_KEY",
+        "INTENT_CLASSIFIER_MODEL",
+        "INTENT_ROUTER_TIMEOUT_SECONDS",
+    }
+    return any(bool(values.get(key)) for key in keys)
+
+
+def _prompt_intent_router(values: dict[str, str], current: dict[str, str], lang: str) -> None:
+    merged = _merge_setup_values(current, values)
+    _write_stderr(
+        _t(
+            lang,
+            "\n[可选增强] 智能意图路由\n用途: 先判断问题需要 docs_search、web_search、web_fetch 还是 vertical_search，再进入同能力 provider 兜底。\n说明: rules 永远可本地兜底；hybrid 可额外配置 embeddings 语义路由和 classifier 结构化分类。\n",
+            "\n[Optional] smart intent routing\nPurpose: decide whether a query needs docs_search, web_search, web_fetch, or vertical_search before same-capability provider fallback.\nNote: rules always remain the local fallback; hybrid can add semantic embeddings and structured classifier routing.\n",
+        )
+    )
+    default_configure = _has_intent_router_config(merged)
+    if not _prompt_yes_no(
+        _t(lang, "是否配置/更新智能意图路由?", "Configure or update smart intent routing?"),
+        default=default_configure,
+    ):
+        return
+
+    mode_default = values.get("SMART_SEARCH_INTENT_ROUTER") or current.get("SMART_SEARCH_INTENT_ROUTER") or "hybrid"
+    if mode_default not in {"hybrid", "rules", "off"}:
+        mode_default = "hybrid"
+    mode = _prompt_select(
+        _t(lang, "选择 intent router 模式", "Choose intent router mode"),
+        [
+            {"name": _t(lang, "hybrid: 规则 + embeddings + classifier，缺配置自动降级 rules", "hybrid: rules + embeddings + classifier, degrading to rules when optional config is missing"), "value": "hybrid"},
+            {"name": _t(lang, "rules: 只用本地规则", "rules: local rules only"), "value": "rules"},
+            {"name": _t(lang, "off: 关闭额外意图路由", "off: disable additional intent routing"), "value": "off"},
+        ],
+        mode_default,
+    )
+    values["SMART_SEARCH_INTENT_ROUTER"] = mode
+    if mode != "hybrid":
+        return
+
+    if _prompt_yes_no(
+        _t(lang, "配置 embeddings 语义路由?", "Configure embeddings semantic routing?"),
+        default=bool(merged.get("INTENT_EMBEDDING_API_URL") or merged.get("INTENT_EMBEDDING_API_KEY") or merged.get("INTENT_EMBEDDING_MODEL")),
+    ):
+        raw_url = _prompt_value(
+            "INTENT_EMBEDDING_API_URL",
+            _t(
+                lang,
+                "Embeddings API 地址（示例: https://api.openai.com/v1/embeddings）",
+                "Embeddings API URL (example: https://api.openai.com/v1/embeddings)",
+            ),
+            current.get("INTENT_EMBEDDING_API_URL", ""),
+            optional=True,
+            lang=lang,
+        )
+        values["INTENT_EMBEDDING_API_URL"] = _normalize_custom_base_url(raw_url)
+        values["INTENT_EMBEDDING_API_KEY"] = _prompt_value(
+            "INTENT_EMBEDDING_API_KEY",
+            "Embeddings API key",
+            current.get("INTENT_EMBEDDING_API_KEY", ""),
+            optional=True,
+            lang=lang,
+        )
+        values["INTENT_EMBEDDING_MODEL"] = _prompt_value(
+            "INTENT_EMBEDDING_MODEL",
+            _t(lang, "Embeddings 模型", "Embeddings model"),
+            current.get("INTENT_EMBEDDING_MODEL", ""),
+            optional=True,
+            lang=lang,
+        )
+
+    if _prompt_yes_no(
+        _t(lang, "配置 classifier 模型路由?", "Configure classifier model routing?"),
+        default=bool(merged.get("INTENT_CLASSIFIER_API_URL") or merged.get("INTENT_CLASSIFIER_API_KEY") or merged.get("INTENT_CLASSIFIER_MODEL")),
+    ):
+        raw_url = _prompt_value(
+            "INTENT_CLASSIFIER_API_URL",
+            _t(
+                lang,
+                "Classifier API 地址（示例: https://api.openai.com/v1/chat/completions）",
+                "Classifier API URL (example: https://api.openai.com/v1/chat/completions)",
+            ),
+            current.get("INTENT_CLASSIFIER_API_URL", ""),
+            optional=True,
+            lang=lang,
+        )
+        values["INTENT_CLASSIFIER_API_URL"] = _normalize_custom_base_url(raw_url)
+        values["INTENT_CLASSIFIER_API_KEY"] = _prompt_value(
+            "INTENT_CLASSIFIER_API_KEY",
+            "Classifier API key",
+            current.get("INTENT_CLASSIFIER_API_KEY", ""),
+            optional=True,
+            lang=lang,
+        )
+        values["INTENT_CLASSIFIER_MODEL"] = _prompt_value(
+            "INTENT_CLASSIFIER_MODEL",
+            _t(lang, "Classifier 模型", "Classifier model"),
+            current.get("INTENT_CLASSIFIER_MODEL", ""),
+            optional=True,
+            lang=lang,
+        )
+
+    values["INTENT_ROUTER_TIMEOUT_SECONDS"] = _prompt_value(
+        "INTENT_ROUTER_TIMEOUT_SECONDS",
+        _t(lang, "Intent router 超时秒数", "Intent router timeout seconds"),
+        current.get("INTENT_ROUTER_TIMEOUT_SECONDS", ""),
+        optional=True,
+        lang=lang,
+    )
+
+
 def _write_setup_keep_note(lang: str) -> None:
     _write_stderr(
         _t(
@@ -1921,6 +2038,7 @@ def _run_guided_setup_prompts(
     _prompt_docs_search(values, current, lang)
     _prompt_web_fetch(values, current, lang)
     _prompt_optional_enhancements(values, current, lang)
+    _prompt_intent_router(values, current, lang)
 
 
 def _write_skill_install_summary(result: dict[str, Any], lang: str) -> None:

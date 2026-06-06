@@ -241,6 +241,7 @@ smart-search deep "https://example.com/source" --format json
 ## Provider And API Key Guide
 
 Use `smart-search setup` for normal configuration. Environment variables remain supported for CI and advanced users.
+The default interactive setup wizard includes optional smart intent router prompts, so embeddings and classifier routing can be configured without `--advanced`.
 
 | Provider / route | Used for | Main config keys | Official docs | Key / dashboard |
 | --- | --- | --- | --- | --- |

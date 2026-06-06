@@ -250,6 +250,7 @@ smart-search deep "https://example.com/source" --format json
 ## API 和 Key 申请入口
 
 普通用户优先用 `smart-search setup` 配置。环境变量仍然支持 CI 和高级用户。
+默认交互式 setup 已包含可选智能意图路由小节，可以直接配置 embeddings 和 classifier 路由，不需要进入 `--advanced`。
 
 | Provider / 路线 | 用途 | 主要配置项 | 官方文档 | Key / 控制台 |
 | --- | --- | --- | --- | --- |

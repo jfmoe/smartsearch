@@ -371,7 +371,8 @@ Interactive setup contract:
   Chinese (`zh`); `--lang en` or `--lang zh` skips the language question.
 - The default setup wizard is capability-first, not key-first. It must guide
   required groups in this order: `main_search`, `docs_search`, `web_fetch`,
-  then optional `web_search` reinforcement.
+  then optional `web_search` reinforcement, then optional smart intent router
+  configuration.
 - The wizard must make the minimum profile visible before and after prompts,
   including `minimum_profile_ok`, missing required capabilities, and configured
   providers per capability.
@@ -392,6 +393,13 @@ Interactive setup contract:
   `https://pool.example.com/api/tavily`.
 - `--advanced` is the compatibility path for low-level key-by-key prompts.
   Most users should stay on the grouped wizard.
+- The default grouped wizard must allow configuring `SMART_SEARCH_INTENT_ROUTER`,
+  `INTENT_EMBEDDING_API_URL`, `INTENT_EMBEDDING_API_KEY`,
+  `INTENT_EMBEDDING_MODEL`, `INTENT_CLASSIFIER_API_URL`,
+  `INTENT_CLASSIFIER_API_KEY`, `INTENT_CLASSIFIER_MODEL`, and
+  `INTENT_ROUTER_TIMEOUT_SECONDS` without `--advanced`. The prompt must make
+  clear that missing or failed remote router components degrade to local rules,
+  and it must keep router keys masked.
 - `--non-interactive` must remain script-stable: it only saves flags passed on
   the command line and must not prompt, inspect local developer-only state, or
   call providers.
@@ -820,6 +828,8 @@ When this contract changes, add or update tests that assert:
 - language-only queries assert `web_current_intent=false` when no current or
   realtime signal is present.
 - interactive setup groups minimum capabilities in Chinese and English;
+- default guided setup can configure intent router, embeddings, classifier,
+  and router timeout without `--advanced`;
 - setup output keeps prompts on stderr and parseable result data on stdout;
 - OpenAI-compatible alone can satisfy `main_search` in the setup wizard;
 - selecting both main providers saves distinct xAI and OpenAI-compatible
