@@ -53,7 +53,7 @@ class Config:
         "EXA_BASE_URL",
         "EXA_TIMEOUT_SECONDS",
         "CONTEXT7_API_KEY",
-        "CONTEXT7_BASE_URL",
+        "CONTEXT7_MCP_API_URL",
         "CONTEXT7_TIMEOUT_SECONDS",
         "ZHIPU_API_KEY",
         "ZHIPU_API_URL",
@@ -612,8 +612,18 @@ class Config:
         return self._get_config_value("CONTEXT7_API_KEY")
 
     @property
-    def context7_base_url(self) -> str:
-        return self._get_config_value("CONTEXT7_BASE_URL", "https://context7.com") or "https://context7.com"
+    def context7_mcp_api_url(self) -> str:
+        return self._get_config_value("CONTEXT7_MCP_API_URL", "https://mcp.context7.com/mcp") or "https://mcp.context7.com/mcp"
+
+    @property
+    def context7_legacy_rest_url(self) -> str:
+        return os.getenv("CONTEXT7_BASE_URL") or str(self._load_config_file().get("CONTEXT7_BASE_URL") or "")
+
+    @property
+    def context7_migration_required(self) -> bool:
+        if not self.context7_legacy_rest_url:
+            return False
+        return os.getenv("CONTEXT7_MCP_API_URL") is None and "CONTEXT7_MCP_API_URL" not in self._load_config_file()
 
     @property
     def context7_timeout(self) -> float:
@@ -790,8 +800,14 @@ class Config:
             "EXA_BASE_URL": self.exa_base_url,
             "EXA_TIMEOUT_SECONDS": self.exa_timeout,
             "CONTEXT7_API_KEY": self._mask_api_key(self.context7_api_key) if self.context7_api_key else "未配置",
-            "CONTEXT7_BASE_URL": self.context7_base_url,
+            "CONTEXT7_MCP_API_URL": self.context7_mcp_api_url,
             "CONTEXT7_TIMEOUT_SECONDS": self.context7_timeout,
+            "context7_migration_required": self.context7_migration_required,
+            "context7_migration_message": (
+                "CONTEXT7_BASE_URL is a retired REST setting. Set CONTEXT7_MCP_API_URL to migrate to Remote MCP."
+                if self.context7_migration_required
+                else ""
+            ),
             "ZHIPU_API_KEY": self._mask_api_key(self.zhipu_api_key) if self.zhipu_api_key else "未配置",
             "ZHIPU_API_URL": self.zhipu_api_url,
             "ZHIPU_SEARCH_ENGINE": self.zhipu_search_engine,

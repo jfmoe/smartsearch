@@ -295,6 +295,19 @@ def test_readme_language_split_and_provider_links_are_documented():
         assert marker in readme_zh
 
 
+def test_context7_remote_mcp_docs_and_skill_reject_old_rest_examples():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    public_text = _read_skill_tree(PUBLIC_SKILL_DIR)
+    packaged_text = _read_skill_tree(PACKAGED_SKILL_DIR)
+
+    for text in (readme, readme_zh, public_text, packaged_text):
+        assert "CONTEXT7_MCP_API_URL" in text
+        assert "https://mcp.context7.com/mcp" in text
+        assert "/facebook/react" in text
+        assert "config set CONTEXT7_BASE_URL" not in text
+
+
 def test_deep_research_shared_skill_files_are_synchronized():
     assert _skill_text_files(PUBLIC_SKILL_DIR) == _skill_text_files(PACKAGED_SKILL_DIR)
 

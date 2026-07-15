@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 
@@ -704,6 +705,45 @@ def test_legacy_main_search_config_keys_are_rejected(monkeypatch, tmp_path):
         assert result["ok"] is False
         assert result["error_type"] == "parameter_error"
         assert f"Unsupported config key: {key}" in result["error"]
+
+
+def test_context7_rest_base_url_is_rejected_and_legacy_only_config_fails_closed(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+    service.config._save_config_file(
+        {
+            "CONTEXT7_API_KEY": "ctx-secret",
+            "CONTEXT7_BASE_URL": "https://context7.example.com",
+        }
+    )
+
+    rejected = service.config_set("CONTEXT7_BASE_URL", "https://context7.example.com")
+    result = asyncio.run(service.context7_library("react", "hooks"))
+
+    assert rejected["ok"] is False
+    assert rejected["error_type"] == "parameter_error"
+    assert result["ok"] is False
+    assert result["error_type"] == "config_error"
+    assert "CONTEXT7_MCP_API_URL" in result["error"]
+    assert "context7" not in service.get_capability_status()["docs_search"]["configured"]
+
+
+def test_context7_mcp_url_is_canonical_and_masks_key_in_doctor(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+    service.config._save_config_file(
+        {
+            "CONTEXT7_API_KEY": "context7-secret-key",
+            "CONTEXT7_BASE_URL": "https://context7.example.com",
+            "CONTEXT7_MCP_API_URL": "https://mcp.example.com/mcp",
+        }
+    )
+
+    info = service.config.get_config_info()
+
+    assert service.config.context7_mcp_api_url == "https://mcp.example.com/mcp"
+    assert info["CONTEXT7_MCP_API_URL"] == "https://mcp.example.com/mcp"
+    assert "CONTEXT7_BASE_URL" not in info
+    assert "context7-secret-key" not in str(info)
+    assert info["context7_migration_required"] is False
 
 
 def test_legacy_main_search_config_keys_are_ignored_from_saved_config(monkeypatch, tmp_path):

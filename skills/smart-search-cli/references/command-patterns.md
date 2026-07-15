@@ -83,6 +83,7 @@ smart-search config set INTENT_CLASSIFIER_MODEL "gpt-4.1-mini" --format json
 smart-search config set INTENT_ROUTER_TIMEOUT_SECONDS "8" --format json
 smart-search config set EXA_API_KEY "key" --format json
 smart-search config set CONTEXT7_API_KEY "key" --format json
+smart-search config set CONTEXT7_MCP_API_URL "https://mcp.context7.com/mcp" --format json
 smart-search config set ZHIPU_API_KEY "key" --format json
 smart-search config set ZHIPU_API_URL "https://open.bigmodel.cn/api" --format json
 smart-search config set ZHIPU_SEARCH_ENGINE "search_pro" --format json
@@ -143,6 +144,7 @@ Agent timeout handling contract: `smart-search search ... --timeout 180 --extra-
 - Do not cite `extra_sources` as proof for a sentence in `content`; fetch the URL first or cite it only as a candidate source.
 - Prefer `exa-search --include-domains` for official documentation when likely domains are known.
 - Do not expose API keys. Treat `doctor` output as safe only because it is expected to mask secrets.
+- Context7 is Remote MCP-only. Never set or suggest `CONTEXT7_BASE_URL`; migrate old REST configuration to `CONTEXT7_MCP_API_URL`.
 - In this CLI-first workflow, native `web_search` is disabled unless the user explicitly configures another approved route.
 - If `doctor` or a command fails, report the failure and recovery steps; do not silently fall back to another web-search route.
 - Do not use legacy MCP tool names in prompts, notes, or generated instructions for this workflow.

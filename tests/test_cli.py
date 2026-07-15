@@ -1485,6 +1485,8 @@ def test_setup_non_interactive_saves_values(monkeypatch, capsys):
         "10",
         "--context7-key",
         "ctx-secret",
+        "--context7-mcp-api-url",
+        "mcp.example.com/mcp",
         "--tavily-api-url",
         "pool.example.com",
         "--tavily-key",
@@ -1533,6 +1535,7 @@ def test_setup_non_interactive_saves_values(monkeypatch, capsys):
     assert saved["JINA_API_KEY"] == "jina-secret"
     assert saved["JINA_READER_API_URL"] == "https://r.jina.ai"
     assert saved["JINA_RESPOND_WITH"] == "readerlm-v2"
+    assert saved["CONTEXT7_MCP_API_URL"] == "https://mcp.example.com/mcp"
     assert saved["JINA_TIMEOUT_SECONDS"] == "10"
     assert saved["CONTEXT7_API_KEY"] == "ctx-secret"
     assert saved["TAVILY_API_URL"] == "https://pool.example.com/api/tavily"

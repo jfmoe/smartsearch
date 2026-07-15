@@ -402,6 +402,8 @@ def _format_doctor_markdown(data: dict[str, Any]) -> str:
     missing = data.get("minimum_profile_missing") or []
     if missing:
         lines.append(f"Missing: `{', '.join(str(item) for item in missing)}`")
+    if data.get("context7_migration_required"):
+        lines.append(f"Context7 migration: {data.get('context7_migration_message', '')}")
 
     config_sources = data.get("config_sources") or {}
     if config_sources:
@@ -2331,6 +2333,7 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
         ("INTENT_ROUTER_TIMEOUT_SECONDS", "Intent router timeout seconds", True),
         ("EXA_API_KEY", "Exa API key", True),
         ("CONTEXT7_API_KEY", "Context7 API key", True),
+        ("CONTEXT7_MCP_API_URL", "Context7 Remote MCP URL", True),
         ("ZHIPU_API_KEY", "Zhipu API key", True),
         ("ZHIPU_API_URL", "Zhipu Web Search API URL", True),
         ("ZHIPU_SEARCH_ENGINE", "Zhipu search service (search_std/search_pro/search_pro_sogou/search_pro_quark/custom)", True),
@@ -2598,6 +2601,7 @@ def _run_setup(args: argparse.Namespace) -> int:
         "INTENT_ROUTER_TIMEOUT_SECONDS": args.intent_router_timeout,
         "EXA_API_KEY": args.exa_key,
         "CONTEXT7_API_KEY": args.context7_key,
+        "CONTEXT7_MCP_API_URL": _normalize_custom_base_url(args.context7_mcp_api_url),
         "ZHIPU_API_KEY": args.zhipu_key,
         "ZHIPU_API_URL": _normalize_zhipu_api_url(args.zhipu_api_url),
         "ZHIPU_SEARCH_ENGINE": args.zhipu_search_engine,
@@ -3073,6 +3077,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--intent-router-timeout", default="", help="Save INTENT_ROUTER_TIMEOUT_SECONDS.")
     setup_parser.add_argument("--exa-key", default="", help="Save EXA_API_KEY.")
     setup_parser.add_argument("--context7-key", default="", help="Save CONTEXT7_API_KEY.")
+    setup_parser.add_argument("--context7-mcp-api-url", default="", help="Save CONTEXT7_MCP_API_URL.")
     setup_parser.add_argument("--zhipu-key", default="", help="Save ZHIPU_API_KEY.")
     setup_parser.add_argument("--zhipu-api-url", default="", help="Save ZHIPU_API_URL.")
     setup_parser.add_argument("--zhipu-search-engine", default="", help="Save ZHIPU_SEARCH_ENGINE.")

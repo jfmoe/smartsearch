@@ -17,5 +17,6 @@ def isolate_smart_search_config(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "_cached_model", None)
     for key in config._CONFIG_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("CONTEXT7_BASE_URL", raising=False)
     monkeypatch.delenv("SMART_SEARCH_CONFIG_DIR", raising=False)
     monkeypatch.setenv("SMART_SEARCH_MINIMUM_PROFILE", "off")
