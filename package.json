@@ -1,15 +1,15 @@
 {
-  "name": "@konbakuyomu/smart-search",
-  "version": "0.1.14",
+  "name": "@jfmoe/smart-search",
+  "version": "0.2.0",
   "description": "CLI-first multi-source web research with xAI/OpenAI-compatible search, Exa, Context7, Zhipu, Tavily, Firecrawl, and Deep Research planning.",
   "license": "MIT",
-  "homepage": "https://github.com/konbakuyomu/smartsearch#readme",
+  "homepage": "https://github.com/jfmoe/smartsearch#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/konbakuyomu/smartsearch.git"
+    "url": "git+https://github.com/jfmoe/smartsearch.git"
   },
   "bugs": {
-    "url": "https://github.com/konbakuyomu/smartsearch/issues"
+    "url": "https://github.com/jfmoe/smartsearch/issues"
   },
   "bin": {
     "smart-search": "npm/bin/smart-search.js"
