@@ -5,8 +5,12 @@ const root = path.resolve(__dirname, "..", "..");
 const legacyOwner = "konba" + "kuyomu";
 const legacyScope = `@${legacyOwner}/smart-search`;
 const legacyRepository = `${legacyOwner}/smartsearch`;
+const historicalReleaseRecords = new Set([
+  ".github/releases/v0.1.14.md"
+]);
 const skippedDirectories = new Set([
   ".git",
+  "__pycache__",
   ".pytest_cache",
   ".smart-search-python",
   ".trellis",
@@ -16,7 +20,7 @@ const skippedDirectories = new Set([
 
 function isAllowedLegacyContext(relativePath) {
   return (
-    relativePath.startsWith(".github/releases/") ||
+    historicalReleaseRecords.has(relativePath) ||
     relativePath === "docs/release/upstream-baseline.md" ||
     relativePath.startsWith("docs/research/")
   );

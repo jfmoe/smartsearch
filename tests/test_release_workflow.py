@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,10 +15,12 @@ POLICY_CHECK = ROOT / "npm" / "scripts" / "verify-release-policy.js"
 METADATA_CHECK = ROOT / "npm" / "scripts" / "verify-release-metadata.js"
 
 
-def run_node(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def run_node(
+    script: Path, *args: str, cwd: Path = ROOT
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["node", str(script), *args],
-        cwd=ROOT,
+        cwd=cwd,
         text=True,
         capture_output=True,
         check=False,
@@ -99,6 +102,27 @@ def test_release_policy_rejects_unallowlisted_legacy_identity() -> None:
     assert result.returncode == 0, result.stderr
 
 
+def test_release_policy_rejects_legacy_identity_in_new_release_notes(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    policy_check = project_root / "npm" / "scripts" / POLICY_CHECK.name
+    policy_check.parent.mkdir(parents=True)
+    shutil.copy2(POLICY_CHECK, policy_check)
+    release_notes = project_root / ".github" / "releases" / "v0.2.0.md"
+    release_notes.parent.mkdir(parents=True)
+    legacy_owner = "konba" + "".join(["kuyomu"])
+    release_notes.write_text(
+        f"npm install -g @{legacy_owner}/smart-search@latest\n",
+        encoding="utf-8",
+    )
+
+    result = run_node(policy_check, cwd=project_root)
+
+    assert result.returncode == 1
+    assert "- .github/releases/v0.2.0.md" in result.stderr
+
+
 def test_public_docs_describe_the_personal_mac_only_release_line() -> None:
     public_sources = [
         ROOT / "README.md",
@@ -151,5 +175,8 @@ def test_release_notes_and_upstream_baseline_are_versioned() -> None:
     )
 
     assert "@jfmoe/smart-search@0.2.0" in notes
-    assert "c61a306b625b79a02b0693d40a468829c20a43a7" in baseline
+    assert "667c465d0f6ea16a423f03c434f94e21505d3595" in baseline
+    assert "c61a306b625b79a02b0693d40a468829c20a43a7" not in baseline
+    assert "refs/heads/main" in baseline
+    assert "commit endpoint" in baseline
     assert "read-only" in baseline
