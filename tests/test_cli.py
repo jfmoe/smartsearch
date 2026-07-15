@@ -1364,6 +1364,31 @@ def test_skills_status_reports_missing_and_update_writes_target(tmp_path, capsys
     assert status["targets"][0]["hash_match"] is True
 
 
+def test_skills_update_preserves_user_files(tmp_path, capsys):
+    installed_skill = (
+        tmp_path / ".codex" / "skills" / "smart-search-cli"
+    )
+    installed_skill.mkdir(parents=True)
+    user_file = installed_skill / "MY-NOTES.md"
+    user_file.write_text("keep me\n", encoding="utf-8")
+
+    code = cli.main([
+        "skills",
+        "update",
+        "--targets",
+        "codex",
+        "--skills-root",
+        str(tmp_path),
+        "--format",
+        "json",
+    ])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert data["installed_count"] == 1
+    assert user_file.read_text(encoding="utf-8") == "keep me\n"
+
+
 def test_skills_update_all_selects_every_target(tmp_path, capsys):
     code = cli.main(["skills", "update", "--all", "--skills-root", str(tmp_path), "--format", "json"])
     data = json.loads(capsys.readouterr().out)
