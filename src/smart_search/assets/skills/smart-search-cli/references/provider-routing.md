@@ -64,6 +64,7 @@ Intent router rules:
 - `map` currently uses Tavily only.
 - `exa-search` and `exa-similar` use Exa only.
 - `context7-library` and `context7-docs` use Context7 only.
+- Context7 uses Remote MCP only: resolve a library with `resolve-library-id`, then query it with `query-docs`. Keep the returned first candidate for automatic Context7 flows; do not follow a library redirect automatically. Explicit Context7 commands report their classified error directly. Automatic `docs_search` may use Exa only when same-capability fallback is allowed, and Exa discovery candidates require `fetch` before they become evidence.
 - `anysearch-domains`, `anysearch-search`, `anysearch-extract`, and `anysearch-batch` use AnySearch only. Treat results as acceptance evidence until the target vertical domain is reviewed.
 - `zhipu-search` uses Zhipu only.
 - `zhipu-mcp-search`, `zhipu-mcp-reader`, and `zhipu-mcp-*` zread commands use Zhipu Coding Plan Remote MCP only.

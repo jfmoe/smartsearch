@@ -557,7 +557,7 @@ def _provider_configured(provider: str) -> bool:
     if provider == "openai-compatible":
         return bool(config.openai_compatible_api_url and config.openai_compatible_api_key)
     if provider == "context7":
-        return bool(config.context7_api_key)
+        return bool(config.context7_api_key and not config.context7_migration_required)
     if provider == "exa":
         return bool(config.exa_api_key)
     if provider == "zhipu":
@@ -1450,7 +1450,7 @@ def get_capability_status() -> dict[str, Any]:
             "configured": [
                 name
                 for name, enabled in [
-                    ("context7", bool(config.context7_api_key)),
+                    ("context7", bool(config.context7_api_key and not config.context7_migration_required)),
                     ("exa", bool(config.exa_api_key)),
                 ]
                 if enabled
@@ -3159,7 +3159,13 @@ async def context7_library(name: str, query: str = "") -> dict[str, Any]:
             "error_type": "config_error",
             "error": "CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。",
         }
-    provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
+    if config.context7_migration_required:
+        return {
+            "ok": False,
+            "error_type": "config_error",
+            "error": "CONTEXT7_BASE_URL is a retired REST setting. Set CONTEXT7_MCP_API_URL to migrate to Remote MCP.",
+        }
+    provider = Context7Provider(config.context7_mcp_api_url, api_key, config.context7_timeout)
     raw = await provider.library(name, query)
     try:
         data = json.loads(raw)
@@ -3178,7 +3184,13 @@ async def context7_docs(library_id: str, query: str) -> dict[str, Any]:
             "error_type": "config_error",
             "error": "CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。",
         }
-    provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
+    if config.context7_migration_required:
+        return {
+            "ok": False,
+            "error_type": "config_error",
+            "error": "CONTEXT7_BASE_URL is a retired REST setting. Set CONTEXT7_MCP_API_URL to migrate to Remote MCP.",
+        }
+    provider = Context7Provider(config.context7_mcp_api_url, api_key, config.context7_timeout)
     raw = await provider.docs(library_id, query)
     try:
         data = json.loads(raw)
@@ -3649,11 +3661,12 @@ async def _test_zhipu_mcp_connection() -> dict[str, Any]:
 
 async def _test_context7_connection() -> dict[str, Any]:
     if not config.context7_api_key:
-        return {"status": "not_configured", "message": "CONTEXT7_API_KEY 未设置，Context7 功能不可用"}
+        return {"status": "not_configured", "message": "CONTEXT7_API_KEY 未设置，Context7 Remote MCP 功能不可用"}
     result = await context7_library("react", "hooks")
     if result.get("ok"):
-        return {"status": "ok", "message": "Context7 API 可用", "response_time_ms": result.get("elapsed_ms", 0)}
-    return {"status": "warning", "message": result.get("error", "Context7 API 不可用"), "response_time_ms": result.get("elapsed_ms", 0)}
+        return {"status": "ok", "message": "Context7 Remote MCP 可用", "response_time_ms": result.get("elapsed_ms", 0)}
+    status = "config_error" if result.get("error_type") == "config_error" else "warning"
+    return {"status": status, "message": result.get("error", "Context7 Remote MCP 不可用"), "response_time_ms": result.get("elapsed_ms", 0)}
 
 
 async def doctor() -> dict[str, Any]:
@@ -4181,7 +4194,7 @@ async def _smoke_live(start: float) -> dict[str, Any]:
         docs_fallback_available = len(capability_status.get("docs_search", {}).get("configured", [])) > 1
         cases.append(
             _case(
-                "context7 library",
+                "context7 resolve library",
                 context7_ok,
                 {
                     "status": context7_status.get("status", ""),
@@ -4192,7 +4205,7 @@ async def _smoke_live(start: float) -> dict[str, Any]:
             )
         )
     else:
-        cases.append(_case("context7 library", True, {"skipped": "CONTEXT7_API_KEY not configured"}))
+        cases.append(_case("context7 resolve library", True, {"skipped": "CONTEXT7_API_KEY not configured"}))
 
     if config.tavily_api_key or config.firecrawl_api_key:
         fetch_result = await fetch("https://example.com")
