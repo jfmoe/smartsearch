@@ -180,6 +180,12 @@ def test_search_help_exposes_timeout(capsys):
     assert "--no-stream" in out
 
 
+def test_search_timeout_defaults_to_180_seconds():
+    args = cli.build_parser().parse_args(["search", "query"])
+
+    assert args.timeout == 180
+
+
 def test_diagnose_openai_compatible_defaults_to_markdown(monkeypatch, capsys):
     async def fake_diagnose(timeout_seconds=30.0):
         return {

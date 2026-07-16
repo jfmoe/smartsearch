@@ -23,10 +23,10 @@ Deep Research planner output uses an explicit `--evidence-dir` when supplied, ot
 ## Common Commands
 
 ```powershell
-smart-search search "query" --extra-sources 5 --timeout 90 --format json --output result.json
+smart-search search "query" --extra-sources 5 --timeout 180 --format json --output result.json
 smart-search search "query" --stream --format json
 smart-search diagnose openai-compatible --format markdown
-smart-search search "query" --platform "Reuters" --model "model-id" --extra-sources 3 --timeout 90 --format json
+smart-search search "query" --platform "Reuters" --model "model-id" --extra-sources 3 --timeout 180 --format json
 smart-search search "nba战报" --format content
 smart-search search "query" --validation strict --fallback auto --providers auto --format json
 smart-search exa-search "query" --num-results 5 --search-type neural --include-text --include-highlights --include-domains docs.example.com developer.mozilla.org --format json

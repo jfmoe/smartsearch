@@ -455,7 +455,7 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 示例：
 
 ```powershell
-smart-search search "query" --validation balanced --extra-sources 3 --timeout 90 --format json --output result.json
+smart-search search "query" --validation balanced --extra-sources 3 --timeout 180 --format json --output result.json
 smart-search route "React useEffect API docs" --format markdown
 smart-search route-calibrate --models "Qwen/Qwen3-Embedding-8B" --format markdown
 smart-search research "query" --budget deep --fallback auto --format json --output research.json
@@ -562,9 +562,9 @@ npm test
 npm pack --dry-run
 ```
 
-## 0.2.1 发行线
+## 0.2.2 发行线
 
-`@jfmoe/smart-search@0.2.1` 是个人发行线。Node 是唯一承诺的 JavaScript
+`@jfmoe/smart-search@0.2.2` 是个人发行线。Node 是唯一承诺的 JavaScript
 启动入口，macOS 是唯一正式支持的平台。公共 Skill 只在
 `skills/smart-search-cli` 中维护，包内镜像由 `scripts/sync-skill.py` 生成。
 

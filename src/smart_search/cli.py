@@ -2741,7 +2741,7 @@ def build_parser() -> argparse.ArgumentParser:
     stream_group = search_parser.add_mutually_exclusive_group()
     stream_group.add_argument("--stream", dest="stream", action="store_true", default=None, help="Use stream=true for OpenAI-compatible main search.")
     stream_group.add_argument("--no-stream", dest="stream", action="store_false", help="Force stream=false for OpenAI-compatible main search.")
-    search_parser.add_argument("--timeout", type=float, default=90, metavar="SECONDS", help="Hard timeout in seconds.")
+    search_parser.add_argument("--timeout", type=float, default=180, metavar="SECONDS", help="Hard timeout in seconds.")
     _add_format_args(search_parser)
 
     route_parser = sub.add_parser(

@@ -209,6 +209,8 @@ def test_search_timeout_retry_policy_is_distributable():
     for marker in contract_markers:
         assert marker in public_contract
         assert marker in packaged_contract
+    assert "--timeout 90" not in public_text
+    assert "--timeout 90" not in packaged_text
 
 
 def test_deep_research_readme_documents_capability_orchestration():
