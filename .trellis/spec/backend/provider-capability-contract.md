@@ -399,10 +399,12 @@ Interactive setup contract:
   `~/.pi/skills/smart-search-cli` path.
 - Runtime skill injection must load bundled package assets, not a developer's
   global `~/.codex/skills`, `~/.cc-switch/skills`, or the local checkout only.
-- Skill contract changes must update both public repo-local skill files under
-  `skills/smart-search-cli/**` and packaged runtime assets under
-  `src/smart_search/assets/skills/smart-search-cli/**`. A source-only skill
-  update leaves installed npm users with stale setup/install guidance.
+- Skill contract changes must be hand-edited only under the public repo-local
+  source `skills/smart-search-cli/**`, then generated with
+  `python scripts/sync-skill.py`. Packaged runtime assets under
+  `src/smart_search/assets/skills/smart-search-cli/**` are a strict mirror and
+  must not be edited by hand. A source change that is not synchronized leaves
+  installed npm users with stale setup/install guidance.
 - `--skip-skills` disables skill install. `--install-skills CSV` explicitly
   chooses targets. `--skills-root PATH` is an advanced override for the
   user-level install root used in portable installs or tests. Normal users
@@ -1126,26 +1128,20 @@ what to type.
 
 ### Wrong
 
-Updating only the public skill copy after a CLI contract change:
-
-```text
-skills/smart-search-cli/references/cli-contract.md
-```
-
-The npm installer reads packaged assets, so installed users may still receive
-old command signatures or regression guidance.
+Editing the public Skill and packaged asset copy independently after a contract
+change. This creates two hand-maintained sources that can drift.
 
 ### Correct
 
-Update the public skill and the package asset copy together:
+Edit only the public source, generate the packaged strict mirror, then check it:
 
 ```text
-skills/smart-search-cli/references/cli-contract.md
-src/smart_search/assets/skills/smart-search-cli/references/cli-contract.md
+skills/smart-search-cli/SKILL.md
+python scripts/sync-skill.py
+python scripts/sync-skill.py --check
 ```
 
-Then assert both copies match, and run source checkout regression before
-release.
+Run source checkout regression before release.
 
 ### Wrong
 
