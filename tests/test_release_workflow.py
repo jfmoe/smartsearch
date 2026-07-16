@@ -67,6 +67,13 @@ def test_resolver_starts_at_beta_one_without_prior_versions():
 
 def test_publish_workflow_separates_main_tests_from_explicit_release_lanes():
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    main_job = workflow.split("\n  main-test:\n", 1)[1].split(
+        "\n  preview-publish:\n", 1
+    )[0]
+    preview_job = workflow.split("\n  preview-publish:\n", 1)[1].split(
+        "\n  stable-publish:\n", 1
+    )[0]
+    stable_job = workflow.split("\n  stable-publish:\n", 1)[1]
 
     assert "branches:" in workflow
     assert "- main" in workflow
@@ -76,16 +83,28 @@ def test_publish_workflow_separates_main_tests_from_explicit_release_lanes():
     assert 'if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then' in workflow
     assert "github.event.inputs.target_sha" in workflow
     assert "github.event.inputs.version" in workflow
-    assert "github.event_name == 'push' && github.ref_type == 'branch'" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "github.event_name == 'push' && github.ref_type == 'tag'" in workflow
-    assert 'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then' in workflow
-    assert "npm publish --access public --provenance --tag next" in workflow
-    assert "npm publish --access public --provenance --tag latest" in workflow
+    assert "github.event_name == 'push' && github.ref_type == 'branch'" in main_job
+    assert "npm test" in main_job
+    assert "npm publish" not in main_job
+    assert "id-token: write" not in main_job
+    assert "contents: write" not in main_job
+    assert "github.event_name == 'workflow_dispatch'" in preview_job
+    assert "TARGET_SHA: ${{ github.event.inputs.target_sha }}" in preview_job
+    assert "PREVIEW_VERSION: ${{ github.event.inputs.version }}" in preview_job
+    assert 'target_sha="${{ github.event.inputs.target_sha }}"' not in preview_job
+    assert 'version="${{ github.event.inputs.version }}"' not in preview_job
+    assert "npm publish --access public --provenance --tag next" in preview_job
+    assert "github.event_name == 'push' && github.ref_type == 'tag'" in stable_job
+    assert (
+        'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then'
+        in stable_job
+    )
+    assert "npm publish --access public --provenance --tag latest" in stable_job
     assert "permissions: {}" in workflow
-    assert "contents: read" in workflow
-    assert "id-token: write" in workflow
-    assert "gh release create" in workflow
+    assert "contents: read" in main_job
+    assert "id-token: write" in preview_job
+    assert "id-token: write" in stable_job
+    assert "gh release create" in stable_job
 
 
 def test_release_docs_explain_beta_lane_and_npm_immutability():

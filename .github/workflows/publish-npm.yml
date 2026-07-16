@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       version:
-        description: "Exact prerelease version based on package.json, for example 0.2.0-beta.1"
+        description: "Exact prerelease based on package.json, for example <package.json version>-beta.1"
         required: true
         type: string
 
@@ -44,9 +44,11 @@ jobs:
       id-token: write
     steps:
       - name: Validate immutable preview input
+        env:
+          TARGET_SHA: ${{ github.event.inputs.target_sha }}
         shell: bash
         run: |
-          target_sha="${{ github.event.inputs.target_sha }}"
+          target_sha="$TARGET_SHA"
           if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "target_sha must be a full 40-character commit SHA." >&2
             exit 1
@@ -56,9 +58,11 @@ jobs:
           ref: ${{ github.event.inputs.target_sha }}
           fetch-depth: 0
       - name: Confirm checked-out commit
+        env:
+          TARGET_SHA: ${{ github.event.inputs.target_sha }}
         shell: bash
         run: |
-          [[ "$(git rev-parse HEAD)" == "${{ github.event.inputs.target_sha }}" ]]
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -70,9 +74,11 @@ jobs:
       - run: node npm/scripts/verify-release-metadata.js
       - run: npm test
       - name: Prepare the preview package
+        env:
+          PREVIEW_VERSION: ${{ github.event.inputs.version }}
         shell: bash
         run: |
-          version="${{ github.event.inputs.version }}"
+          version="$PREVIEW_VERSION"
           base_version="$(node -p "require('./package.json').version")"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z][0-9A-Za-z.-]*$ ]] || [[ "$version" != "$base_version"-* ]]; then
             echo "version must be a prerelease of package.json version $base_version." >&2
