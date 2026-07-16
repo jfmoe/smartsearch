@@ -65,27 +65,34 @@ def test_resolver_starts_at_beta_one_without_prior_versions():
     assert run_resolver("0.2.0", []) == "0.2.0-beta.1"
 
 
-def test_publish_workflow_uses_beta_lane_and_prerelease_guardrails():
+def test_main_workflow_is_test_only_until_release_lanes_are_merged():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "workflow_dispatch:" in workflow
-    assert "github.event.inputs.target_ref" in workflow
-    assert "github.event.inputs.version" in workflow
-    assert "github.event.inputs.npm_tag" in workflow
-    assert "resolve-prerelease-version.js" in workflow
-    assert "Detect stable release bump commit" in workflow
-    assert "chore\\(release\\)" in workflow
-    assert "stable-bump.outputs.skip != 'true'" in workflow
-    assert "-dev.${GITHUB_RUN_NUMBER}" not in workflow
-    assert "&& inputs." not in workflow
-    assert "|| inputs." not in workflow
-    assert "tag=\"next\"" in workflow
-    assert "tag=\"latest\"" in workflow
-    assert "Refusing to publish prerelease version" in workflow
-    assert "notes_file=\".github/releases/v${version}.md\"" in workflow
-    assert "notes_footer=\"$(printf" in workflow
-    assert "gh release create" in workflow
-    assert "--prerelease" in workflow
+    assert workflow == """name: Test main branch
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  main-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm test
+"""
 
 
 def test_release_docs_explain_beta_lane_and_npm_immutability():
