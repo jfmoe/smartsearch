@@ -43,20 +43,14 @@ function capture(command, args) {
   return result.stdout || "";
 }
 
-function runNpm(args) {
-  if (process.env.npm_execpath) {
-    run(process.execPath, [process.env.npm_execpath, ...args]);
-    return;
-  }
-  run("npm", args, { shell: process.platform === "win32" });
-}
-
 if (!fs.existsSync(pythonPath)) {
   console.error("Missing .smart-search-python runtime. Run npm install first.");
   process.exit(1);
 }
 
 run(pythonPath, ["-m", "pip", "install", "--disable-pip-version-check", "-e", ".[dev]"]);
+run(process.execPath, ["npm/scripts/verify-release-metadata.js"]);
+run(process.execPath, ["npm/scripts/verify-release-policy.js"]);
 run(pythonPath, ["scripts/sync-skill.py", "--check"]);
 run(pythonPath, ["-m", "pytest"]);
 run(process.execPath, ["npm/scripts/test-wrapper-repair.js"]);
@@ -73,4 +67,4 @@ if (deepPlan.question !== "深度搜索一下最近的比特币行情") {
   console.error("npm wrapper must preserve non-ASCII CLI arguments and JSON output as UTF-8.");
   process.exit(1);
 }
-runNpm(["pack", "--dry-run"]);
+run(process.execPath, ["npm/scripts/verify-pack.js"]);

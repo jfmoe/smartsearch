@@ -13,10 +13,11 @@
 
 - `smart-search` is the primary CLI and should resolve from the user's PATH.
 - `smart-search --version`, `smart-search --v`, and `smart-search -v` print the installed version and exit with code `0`.
-- This bundled skill is maintained with the `smartsearch` repository.
+- This bundled skill is maintained with the `jfmoe/smartsearch` repository.
+- Node is the only promised JavaScript launcher. The 0.2.0 release line formally supports macOS only; do not add Bun detection, Bun setup, or platform-specific release gates.
 - Private API keys should be saved with `smart-search setup` or `smart-search config set`; environment variables remain supported for CI and advanced users.
 - Do not depend on MCP inline `env` values or committed API-key environment variables for CLI use.
-- On Windows with mise, the managed package name is `npm:@konbakuyomu/smart-search`; the executable remains `smart-search`. Diagnose mise managed installs with `mise ls "npm:@konbakuyomu/smart-search"` and `mise which smart-search`.
+- Install the personal npm package as `@jfmoe/smart-search`; the executable remains `smart-search`.
 
 ## Commands
 

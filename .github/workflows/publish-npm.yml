@@ -1,14 +1,27 @@
-name: Test main branch
+name: Release npm package
 
 on:
   push:
     branches:
       - main
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Immutable full 40-character commit SHA for a preview release"
+        required: true
+        type: string
+      version:
+        description: "Exact prerelease version based on package.json, for example 0.2.0-beta.1"
+        required: true
+        type: string
 
 permissions: {}
 
 jobs:
   main-test:
+    if: github.event_name == 'push' && github.ref_type == 'branch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -22,3 +35,110 @@ jobs:
           python-version: "3.12"
       - run: npm ci
       - run: npm test
+
+  preview-publish:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate immutable preview input
+        env:
+          TARGET_SHA: ${{ github.event.inputs.target_sha }}
+        shell: bash
+        run: |
+          target_sha="$TARGET_SHA"
+          if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "target_sha must be a full 40-character commit SHA." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.target_sha }}
+          fetch-depth: 0
+      - name: Confirm checked-out commit
+        env:
+          TARGET_SHA: ${{ github.event.inputs.target_sha }}
+        shell: bash
+        run: |
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: node npm/scripts/verify-release-metadata.js
+      - run: npm test
+      - name: Prepare the preview package
+        env:
+          PREVIEW_VERSION: ${{ github.event.inputs.version }}
+        shell: bash
+        run: |
+          version="$PREVIEW_VERSION"
+          base_version="$(node -p "require('./package.json').version")"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z][0-9A-Za-z.-]*$ ]] || [[ "$version" != "$base_version"-* ]]; then
+            echo "version must be a prerelease of package.json version $base_version." >&2
+            exit 1
+          fi
+          node npm/scripts/set-package-version.js "$version"
+          node npm/scripts/verify-release-metadata.js "$version"
+      - name: Publish preview to npm next
+        run: npm publish --access public --provenance --tag next
+
+  stable-publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Validate stable tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "stable releases require an exact vX.Y.Z tag." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - name: Verify immutable stable metadata
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          node npm/scripts/verify-release-metadata.js "$tag_version"
+      - run: npm test
+      - name: Publish stable to npm latest
+        run: npm publish --access public --provenance --tag latest
+
+  stable-release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: stable-publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Create GitHub release from versioned notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --target "$(git rev-parse HEAD)" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file ".github/releases/v${GITHUB_REF_NAME#v}.md"

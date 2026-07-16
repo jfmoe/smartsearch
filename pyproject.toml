@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "smart-search"
-version = "0.1.14"
+version = "0.2.0"
 description = "CLI-first multi-source web research with xAI/OpenAI-compatible search, Exa, Context7, Zhipu, Tavily, Firecrawl, and Deep Research planning."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,11 @@ dependencies = [
     "rich>=13.9,<16",
     "tenacity>=8.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/jfmoe/smartsearch#readme"
+Repository = "https://github.com/jfmoe/smartsearch"
+Issues = "https://github.com/jfmoe/smartsearch/issues"
 
 [project.optional-dependencies]
 dev = [
