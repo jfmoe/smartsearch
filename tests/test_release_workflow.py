@@ -84,7 +84,7 @@ def test_release_identity_and_versions_are_consistent() -> None:
     pyproject = PYPROJECT.read_text(encoding="utf-8")
 
     assert package["name"] == "@jfmoe/smart-search"
-    assert package["version"] == "0.2.0"
+    assert package["version"] == "0.2.1"
     assert package["homepage"] == "https://github.com/jfmoe/smartsearch#readme"
     assert package["repository"]["url"] == "git+https://github.com/jfmoe/smartsearch.git"
     assert package["bugs"]["url"] == "https://github.com/jfmoe/smartsearch/issues"
@@ -92,7 +92,7 @@ def test_release_identity_and_versions_are_consistent() -> None:
     assert lock["version"] == package["version"]
     assert lock["packages"][""]["name"] == package["name"]
     assert lock["packages"][""]["version"] == package["version"]
-    assert re.search(r'^version = "0\.2\.0"$', pyproject, flags=re.MULTILINE)
+    assert re.search(r'^version = "0\.2\.1"$', pyproject, flags=re.MULTILINE)
     assert 'Homepage = "https://github.com/jfmoe/smartsearch#readme"' in pyproject
     assert run_node(METADATA_CHECK).returncode == 0
 
@@ -135,7 +135,7 @@ def test_public_docs_describe_the_personal_mac_only_release_line() -> None:
 
     for marker in [
         "@jfmoe/smart-search",
-        "0.2.0",
+        "0.2.1",
         "macOS",
         "Node",
         "workflow_dispatch",
@@ -235,12 +235,12 @@ def test_publish_workflow_has_separate_test_preview_and_stable_lanes() -> None:
 
 
 def test_release_notes_and_upstream_baseline_are_versioned() -> None:
-    notes = (ROOT / ".github" / "releases" / "v0.2.0.md").read_text(encoding="utf-8")
+    notes = (ROOT / ".github" / "releases" / "v0.2.1.md").read_text(encoding="utf-8")
     baseline = (ROOT / "docs" / "release" / "upstream-baseline.md").read_text(
         encoding="utf-8"
     )
 
-    assert "@jfmoe/smart-search@0.2.0" in notes
+    assert "@jfmoe/smart-search@0.2.1" in notes
     assert "667c465d0f6ea16a423f03c434f94e21505d3595" in baseline
     assert "c61a306b625b79a02b0693d40a468829c20a43a7" not in baseline
     assert "refs/heads/main" in baseline

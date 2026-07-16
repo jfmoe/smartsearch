@@ -1,6 +1,6 @@
 ---
 name: smart-search-cli
-description: "CLI-first web research and source retrieval through the local smart-search command. Use when Codex needs current web search, source-backed fact checking, URL fetching, site mapping, official/API/documentation search, deep research, or reproducible search evidence via Skill + CLI instead of MCP tools or native web search."
+description: "CLI-first web research and source retrieval through the local smart-search command. Use when the user needs current web search, X/Twitter search, source-backed fact checking, URL fetching, site mapping, official/API/documentation search, deep research, or reproducible search evidence via Skill + CLI instead of MCP tools or native web search."
 ---
 
 # Smart Search CLI
@@ -13,7 +13,7 @@ Select the first branch whose condition matches the user's task. Load only the c
 
 ### 1. Research or retrieval
 
-**Choose this branch when:** the user wants web research, current information, documentation, a known URL fetched, or Deep Research, and no Smart Search failure is currently blocking the work.
+**Choose this branch when:** the user wants web research, current information, X/Twitter search, documentation, a known URL fetched, or Deep Research, and no Smart Search failure is currently blocking the work.
 
 1. Select the required capability before selecting a provider: broad or current discovery, documentation search, known-URL fetch, experimental vertical search, or Deep Research orchestration. Read `references/provider-routing.md` for capability boundaries.
 2. Run the matching `smart-search` command. Read `references/command-patterns.md` for evidence-oriented commands and timeout recovery, `references/deep-research-mode.md` only for an explicit deep/multi-source request, and `references/cli-core.md` only when exact syntax or output fields matter.
