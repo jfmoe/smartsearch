@@ -67,22 +67,32 @@ def test_resolver_starts_at_beta_one_without_prior_versions():
 
 def test_main_workflow_is_test_only_until_release_lanes_are_merged():
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    jobs = workflow.split("\njobs:\n", 1)[1]
 
-    assert "branches:" in workflow
-    assert "- main" in workflow
-    assert "workflow_dispatch:" not in workflow
-    assert "tags:" not in workflow
-    assert "permissions: {}" in workflow
-    assert jobs.count("  main-test:\n") == 1
-    assert "\n  preview-publish:\n" not in jobs
-    assert "\n  stable-publish:\n" not in jobs
-    assert "contents: read" in jobs
-    assert "npm test" in jobs
-    assert "npm publish" not in workflow
-    assert "id-token: write" not in workflow
-    assert "contents: write" not in workflow
-    assert "github.event.inputs." not in workflow
+    assert workflow == """name: Test main branch
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  main-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm test
+"""
 
 
 def test_release_docs_explain_beta_lane_and_npm_immutability():
