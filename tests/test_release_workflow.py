@@ -65,27 +65,27 @@ def test_resolver_starts_at_beta_one_without_prior_versions():
     assert run_resolver("0.2.0", []) == "0.2.0-beta.1"
 
 
-def test_publish_workflow_uses_beta_lane_and_prerelease_guardrails():
+def test_publish_workflow_separates_main_tests_from_explicit_release_lanes():
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
+    assert "branches:" in workflow
+    assert "- main" in workflow
     assert "workflow_dispatch:" in workflow
-    assert "github.event.inputs.target_ref" in workflow
+    assert "target_sha:" in workflow
+    assert "full 40-character commit SHA" in workflow
+    assert 'if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then' in workflow
+    assert "github.event.inputs.target_sha" in workflow
     assert "github.event.inputs.version" in workflow
-    assert "github.event.inputs.npm_tag" in workflow
-    assert "resolve-prerelease-version.js" in workflow
-    assert "Detect stable release bump commit" in workflow
-    assert "chore\\(release\\)" in workflow
-    assert "stable-bump.outputs.skip != 'true'" in workflow
-    assert "-dev.${GITHUB_RUN_NUMBER}" not in workflow
-    assert "&& inputs." not in workflow
-    assert "|| inputs." not in workflow
-    assert "tag=\"next\"" in workflow
-    assert "tag=\"latest\"" in workflow
-    assert "Refusing to publish prerelease version" in workflow
-    assert "notes_file=\".github/releases/v${version}.md\"" in workflow
-    assert "notes_footer=\"$(printf" in workflow
+    assert "github.event_name == 'push' && github.ref_type == 'branch'" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "github.event_name == 'push' && github.ref_type == 'tag'" in workflow
+    assert 'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then' in workflow
+    assert "npm publish --access public --provenance --tag next" in workflow
+    assert "npm publish --access public --provenance --tag latest" in workflow
+    assert "permissions: {}" in workflow
+    assert "contents: read" in workflow
+    assert "id-token: write" in workflow
     assert "gh release create" in workflow
-    assert "--prerelease" in workflow
 
 
 def test_release_docs_explain_beta_lane_and_npm_immutability():
