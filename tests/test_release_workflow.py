@@ -13,6 +13,7 @@ LOCK = ROOT / "package-lock.json"
 PYPROJECT = ROOT / "pyproject.toml"
 POLICY_CHECK = ROOT / "npm" / "scripts" / "verify-release-policy.js"
 METADATA_CHECK = ROOT / "npm" / "scripts" / "verify-release-metadata.js"
+CANDIDATE_HANDOFF = ROOT / "docs" / "release" / "v0.2.0-release-candidate.md"
 
 
 def run_node(
@@ -245,3 +246,32 @@ def test_release_notes_and_upstream_baseline_are_versioned() -> None:
     assert "refs/heads/main" in baseline
     assert "commit endpoint" in baseline
     assert "read-only" in baseline
+
+
+def test_release_candidate_handoff_defines_the_immutable_release_sequence() -> None:
+    handoff = CANDIDATE_HANDOFF.read_text(encoding="utf-8")
+
+    for marker in [
+        "@jfmoe/smart-search@0.2.0",
+        "667c465d0f6ea16a423f03c434f94e21505d3595",
+        "0.2.0-beta.1",
+        "0.2.0-beta.2",
+        "v0.2.0",
+        "next",
+        "latest",
+        "registry",
+        "dist-tag",
+        "integrity",
+        "provenance",
+        "workflow run",
+        "GitHub Release",
+        "issue/PR evidence ledger",
+        "Do not continue",
+        "must not point to a preview",
+        "must not be overwritten",
+        "must not be moved",
+    ]:
+        assert marker in handoff
+
+    for sensitive_placeholder in ["<TOKEN>", "<OTP>", "NPM_TOKEN=", "OTP="]:
+        assert sensitive_placeholder not in handoff
