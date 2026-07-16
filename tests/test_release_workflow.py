@@ -147,25 +147,90 @@ def test_public_docs_describe_the_personal_mac_only_release_line() -> None:
 
 def test_publish_workflow_has_separate_test_preview_and_stable_lanes() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    jobs = workflow.split("\njobs:\n", 1)[1]
+    main_job = jobs.split("  main-test:\n", 1)[1].split(
+        "\n  preview-publish:\n", 1
+    )[0]
+    preview_job = jobs.split("\n  preview-publish:\n", 1)[1].split(
+        "\n  stable-publish:\n", 1
+    )[0]
+    stable_publish_job = jobs.split("\n  stable-publish:\n", 1)[1].split(
+        "\n  stable-release:\n", 1
+    )[0]
+    stable_release_job = jobs.split("\n  stable-release:\n", 1)[1]
+
+    def job_permissions(job: str) -> list[str]:
+        permissions = job.split("\n    permissions:\n", 1)[1].split(
+            "\n    steps:\n", 1
+        )[0]
+        return [line.strip() for line in permissions.splitlines()]
 
     assert "branches:" in workflow
     assert "- main" in workflow
+    assert '"v[0-9]+.[0-9]+.[0-9]+"' in workflow
+    assert '"v*"' not in workflow
     assert "workflow_dispatch:" in workflow
     assert "target_sha:" in workflow
     assert "full 40-character commit SHA" in workflow
-    assert 'if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then' in workflow
-    assert "github.event.inputs.target_sha" in workflow
-    assert "github.event_name == 'push' && github.ref_type == 'branch'" in workflow
-    assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert r'if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z]' in workflow
-    assert "github.event_name == 'push' && github.ref_type == 'tag'" in workflow
-    assert 'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then' in workflow
-    assert 'node npm/scripts/verify-release-metadata.js "$tag_version"' in workflow
-    assert "npm publish --access public --provenance --tag next" in workflow
-    assert "npm publish --access public --provenance --tag latest" in workflow
-    assert '--target "$(git rev-parse HEAD)"' in workflow
-    assert "contents: read" in workflow
-    assert "id-token: write" in workflow
+    assert re.findall(r"^  ([a-z][a-z0-9-]+):$", jobs, flags=re.MULTILINE) == [
+        "main-test",
+        "preview-publish",
+        "stable-publish",
+        "stable-release",
+    ]
+
+    assert "github.event_name == 'push' && github.ref_type == 'branch'" in main_job
+    assert job_permissions(main_job) == ["contents: read"]
+    assert "npm test" in main_job
+    assert "npm publish" not in main_job
+
+    assert "github.event_name == 'workflow_dispatch'" in preview_job
+    assert 'if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then' in preview_job
+    assert (
+        r'if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z]'
+        in preview_job
+    )
+    input_lines = [
+        line.strip()
+        for line in preview_job.splitlines()
+        if "${{ github.event.inputs." in line
+    ]
+    assert input_lines == [
+        "TARGET_SHA: ${{ github.event.inputs.target_sha }}",
+        "ref: ${{ github.event.inputs.target_sha }}",
+        "TARGET_SHA: ${{ github.event.inputs.target_sha }}",
+        "PREVIEW_VERSION: ${{ github.event.inputs.version }}",
+    ]
+    assert job_permissions(preview_job) == ["contents: read", "id-token: write"]
+    assert "npm publish --access public --provenance --tag next" in preview_job
+
+    assert (
+        "github.event_name == 'push' && github.ref_type == 'tag'"
+        in stable_publish_job
+    )
+    assert (
+        'if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then'
+        in stable_publish_job
+    )
+    assert (
+        'node npm/scripts/verify-release-metadata.js "$tag_version"'
+        in stable_publish_job
+    )
+    assert job_permissions(stable_publish_job) == [
+        "contents: read",
+        "id-token: write",
+    ]
+    assert (
+        "npm publish --access public --provenance --tag latest"
+        in stable_publish_job
+    )
+    assert "gh release create" not in stable_publish_job
+
+    assert "needs: stable-publish" in stable_release_job
+    assert job_permissions(stable_release_job) == ["contents: write"]
+    assert "npm " not in stable_release_job
+    assert "gh release create" in stable_release_job
+    assert '--target "$(git rev-parse HEAD)"' in stable_release_job
 
 
 def test_release_notes_and_upstream_baseline_are_versioned() -> None:
