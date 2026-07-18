@@ -22,6 +22,12 @@ from .skill_installer import (
     normalize_skill_containers,
     status_skill_containers,
 )
+from .skill_sync import (
+    EXPLICIT_LOCK_TIMEOUT_SECONDS,
+    automatic_skill_sync,
+    replace_skill_preference,
+    skill_preference_lock,
+)
 
 
 EXIT_OK = 0
@@ -2253,6 +2259,18 @@ def _run_guided_setup_prompts(
     _prompt_intent_router(values, current, lang)
 
 
+def _prompt_setup_skill_containers(lang: str) -> list[str]:
+    _write_stderr(
+        _t(
+            lang,
+            "\nSkill 安装目标（默认 agents）。可输入 agents、claude、hermes 或自定义 Skill Container，多个值用逗号分隔: ",
+            "\nSkill Containers (default: agents). Enter agents, claude, hermes, or custom paths separated by commas: ",
+        )
+    )
+    raw = input("").strip()
+    return [part.strip() for part in raw.split(",")] if raw else ["agents"]
+
+
 def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str], lang: str) -> None:
     _write_stderr(
         _t(
@@ -2491,20 +2509,33 @@ def _run_config(args: argparse.Namespace) -> int:
 def _run_skills(args: argparse.Namespace) -> int:
     current_version = _get_version()
     try:
+        with skill_preference_lock(service.config, EXPLICIT_LOCK_TIMEOUT_SECONDS) as acquired:
+            if not acquired:
+                data = {
+                    "ok": False,
+                    "error_type": "runtime_error",
+                    "error": "Timed out waiting to update the Skill Installation Preference. Please retry.",
+                    "paths": [],
+                }
+                return _print_result("skills", data, args.format, args.output)
+            return _run_skills_locked(args, current_version)
+    except OSError as error:
+        data = {
+            "ok": False,
+            "error_type": "runtime_error",
+            "error": f"Unable to prepare the Skill preference lock: {error}. Check the active config directory and retry.",
+            "paths": [],
+        }
+        return _print_result("skills", data, args.format, args.output)
+
+
+def _run_skills_locked(args: argparse.Namespace, current_version: str) -> int:
+    try:
         if args.skills_command == "install":
             requested = args.target_or_path or ["agents"]
-            paths = normalize_skill_containers(requested)
-            preferences = service.config.set_skill_preferences(paths)
-            data = install_skill_containers(paths)
-            if data["ok"]:
-                preferences = service.config.set_skill_preferences(paths, last_synced_cli_version=current_version)
-            else:
+            data = replace_skill_preference(service.config, requested, current_version)
+            if not data["ok"]:
                 data.update(error_type="runtime_error", error="One or more Skill Containers failed to install.")
-            data.update(
-                current_cli_version=current_version,
-                last_synced_cli_version=preferences["last_synced_cli_version"],
-                sync_pending=bool(paths) and preferences["last_synced_cli_version"] != current_version,
-            )
         elif args.skills_command == "clear":
             preferences = service.config.set_skill_preferences([], last_synced_cli_version=current_version)
             data = {
@@ -2544,6 +2575,22 @@ def _run_skills(args: argparse.Namespace) -> int:
     except ValueError as error:
         data = {"ok": False, "error_type": "config_error", "error": str(error), "paths": []}
     return _print_result("skills", data, args.format, args.output)
+
+
+def _run_automatic_skill_sync() -> None:
+    result = automatic_skill_sync(service.config, _get_version())
+    if result.get("ok"):
+        return
+    if result.get("reason") == "lock_timeout":
+        _write_stderr(
+            "Automatic Skill Sync skipped because another process is updating Skill preferences. "
+            "The requested command will continue; retry later.\n"
+        )
+        return
+    _write_stderr(
+        "Automatic Skill Sync could not update every saved Skill Container. "
+        "The requested command will continue; run `smart-search skills update` to repair.\n"
+    )
 
 
 def _run_setup(args: argparse.Namespace) -> int:
@@ -2620,6 +2667,22 @@ def _run_setup(args: argparse.Namespace) -> int:
             saved[key] = result.get("value", "")
 
     data = {"ok": True, "config_file": service.config_path()["config_file"], "saved": saved}
+    if not args.non_interactive and not args.skip_skills:
+        requested = _prompt_setup_skill_containers(lang)
+        try:
+            with skill_preference_lock(service.config, EXPLICIT_LOCK_TIMEOUT_SECONDS) as acquired:
+                if not acquired:
+                    raise SkillInstallError("Timed out waiting to update the Skill Installation Preference. Please retry.")
+                skill_result = replace_skill_preference(service.config, requested, _get_version())
+                data["skills"] = skill_result
+                if not skill_result["ok"]:
+                    data.update(
+                        ok=False,
+                        error_type="runtime_error",
+                        error="One or more Skill Containers failed to install.",
+                    )
+        except SkillInstallError as error:
+            data.update(ok=False, error_type="parameter_error", error=str(error))
     if setup_warnings:
         data["warnings"] = setup_warnings
     if not args.non_interactive:
@@ -3090,6 +3153,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     args = parser.parse_args(arguments)
     try:
+        if args.command not in {"setup", "skills"}:
+            _run_automatic_skill_sync()
         if args.command == "regression":
             return _run_regression()
         if args.command == "setup":

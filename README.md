@@ -124,11 +124,14 @@ smart-search skills install
 smart-search skills install agents claude hermes "C:\Users\me\.other-tool\skills"
 ```
 
-With no arguments, installation selects only the Agents Skill Target (`~/.agents/skills`). The only built-in names are
+With no arguments, installation selects only the Agents Skill Target (`~/.agents/skills`). Interactive `smart-search setup`
+uses the same default and accepts `agents`, `claude`, `hermes`, and custom Skill Containers in its final Skill prompt.
+Use `--skip-skills` to make interactive setup perform no Skill writes and preserve the existing preference. Non-interactive setup never changes Skill preferences.
+The only built-in names are
 `agents`, `claude`, and `hermes`; every other positional argument is a custom Skill Container. Smart Search appends the
 `smart-search-cli` child directory, saves normalized container paths in `config.json`, and leaves provider configuration intact.
 
-9. After upgrading the CLI, refresh the installed global skill:
+9. Inspect or manually repair synchronized Skills:
 
 ```powershell
 smart-search skills status --format json
@@ -138,7 +141,14 @@ smart-search skills clear --format json
 
 `skills status` and `skills update` operate only on the saved Skill Installation Preference. `skills clear` disables future
 management by saving an empty path set without uninstalling files. Updates overwrite bundled managed files but preserve
-user-added and obsolete extra files. Provider setup never changes Skill preferences.
+user-added and obsolete extra files. Outside the explicit interactive Skill prompt, provider setup does not change Skill preferences.
+
+Automatic Skill Sync compares the exact CLI version string with the last fully synchronized version before the first ordinary command.
+Any mismatch—including an upgrade, downgrade, or release-channel switch—synchronizes every saved container; an exact match is a no-op.
+Successful background work is silent, so JSON/content stdout stays unchanged. A partial write or bounded lock timeout leaves synchronization pending,
+prints concise repair guidance to standard error, and never changes the requested command's stdout or exit code. Run
+`smart-search skills update --format json` to repair. Help, version, setup, and all `skills` management commands skip background synchronization.
+If no structured preference exists, the first ordinary command initializes only the Agents Skill Target; legacy directories are not scanned or migrated.
 
 ## Current Architecture
 

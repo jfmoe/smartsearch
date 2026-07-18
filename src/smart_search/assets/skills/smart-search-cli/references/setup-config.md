@@ -33,11 +33,12 @@
 ## Setup Workflow
 
 - Interactive `smart-search setup` is a language-selecting grouped wizard with arrow-key / Space / Enter provider selection. It guides users through required `main_search`, `docs_search`, and fetch capability, then optional `web_search` reinforcement and optional smart intent router configuration.
-- Default `smart-search setup` shows a Smart Search ASCII banner, asks for `zh` or `en`, then shows a grouped provider wizard. Skill destinations are managed separately with `smart-search skills install`.
+- Default `smart-search setup` shows a Smart Search ASCII banner, asks for `zh` or `en`, shows a grouped provider wizard, then establishes a Skill Installation Preference. The Skill prompt defaults to the Agents Skill Target and accepts `agents`, `claude`, `hermes`, or custom Skill Containers with the same replacement semantics as `smart-search skills install`.
 - The grouped wizard should use an arrow-key / Space / Enter selector when packaged TUI dependencies are available, with a text fallback for non-TTY and tests.
 - Use `smart-search setup --lang en` for an English wizard.
 - Use `smart-search setup --advanced` only when low-level config keys must be shown one by one; normal intent router, embeddings, and classifier setup is available in the default wizard.
 - `--non-interactive` keeps script behavior and only saves values passed as flags.
+- `--skip-skills` makes interactive setup perform no Skill writes and preserve any existing preference. Non-interactive setup never changes Skill preferences.
 - Required groups are `main_search`, `docs_search`, and `web_fetch`; `web_search` is optional reinforcement, followed by optional smart intent router configuration.
 - Unchecking a configured provider must not delete existing config values; use `smart-search config unset KEY` for deletion.
 - Interactive output should summarize `minimum_profile_ok`, missing required capabilities, and next-step commands.
@@ -51,7 +52,11 @@
 - `smart-search skills status --format json` compares bundled files with every saved container. Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and `error`; managed hash match remains distinct from exact hash match.
 - `smart-search skills update --format json` overwrites current bundled managed files in every saved container while preserving user-added and obsolete extra files.
 - `smart-search skills clear --format json` saves an empty preference and stops future management without deleting installed files. Empty preferences are valid for status and update.
-- Provider setup never changes Skill preferences. Skill management must not run setup prompts, create Trellis files, hooks, agents, or commands, modify provider keys, or delete leftover files.
+- Automatic Skill Sync compares the exact CLI version string with `last_synced_cli_version` before the first ordinary command. Upgrades, downgrades, and release-channel changes all synchronize every saved container; an exact match is a no-op.
+- When structured Skill preferences are absent, the first ordinary command initializes only the Agents Skill Target and attempts synchronization. It must not scan, infer, or migrate legacy installation directories.
+- Successful Automatic Skill Sync is silent. Failure or a bounded background lock timeout remains pending, writes repair guidance only to standard error, and does not alter the requested command's stdout, execution, or exit code. Use `smart-search skills update --format json` for explicit repair.
+- Help, version, setup, and every `skills` management command skip background synchronization. Configuration and managed Skill writes are atomically replaced and cross-process preference changes are serialized.
+- Provider setup outside the interactive Skill prompt never changes Skill preferences. Skill management must not create Trellis files, hooks, agents, or commands, modify provider keys, or delete leftover files.
 
 ## Provider Endpoint Setup
 

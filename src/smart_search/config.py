@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 class Config:
@@ -182,15 +183,40 @@ class Config:
             return {}
 
     def _save_config_file(self, config_data: dict) -> None:
+        temporary_path: Path | None = None
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.config_file.parent,
+                prefix=f".{self.config_file.name}.",
+                delete=False,
+            ) as f:
+                temporary_path = Path(f.name)
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, self.config_file)
         except (IOError, PermissionError, OSError) as e:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             hint = " (sandbox/CI 下可设 SMART_SEARCH_CONFIG_DIR 指向可写目录)" if isinstance(e, PermissionError) else ""
             raise ValueError(f"无法保存配置文件: {str(e)}{hint}")
 
     def get_skill_preferences(self) -> dict | None:
-        data = self._load_config_file()
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as config_file:
+                data = json.load(config_file)
+        except FileNotFoundError:
+            return None
+        except (PermissionError, OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Invalid configuration file: {error}") from error
+        if not isinstance(data, dict):
+            raise ValueError("Invalid configuration file: expected an object.")
         if "skills" not in data:
             return None
         skills = data["skills"]

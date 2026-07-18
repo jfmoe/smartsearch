@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from hashlib import sha256
 from importlib import resources
 from pathlib import Path
@@ -244,7 +245,26 @@ def install_skill_containers(
             for relative, content in files:
                 file_path = destination / relative
                 file_path.parent.mkdir(parents=True, exist_ok=True)
-                file_path.write_bytes(content)
+                temporary_path: Path | None = None
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        mode="wb",
+                        dir=file_path.parent,
+                        prefix=f".{file_path.name}.",
+                        delete=False,
+                    ) as temporary:
+                        temporary_path = Path(temporary.name)
+                        temporary.write(content)
+                        temporary.flush()
+                        os.fsync(temporary.fileno())
+                    os.replace(temporary_path, file_path)
+                except OSError:
+                    if temporary_path is not None:
+                        try:
+                            temporary_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    raise
             installed.append({"container": container, "path": str(destination), "files": len(files)})
         except OSError as error:
             failed.append({"container": container, "path": str(destination), "error": str(error)})

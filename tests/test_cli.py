@@ -2499,7 +2499,7 @@ def test_setup_interactive_does_not_print_current_secret(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", fake_input)
     monkeypatch.setattr(cli.getpass, "getpass", fake_getpass)
 
-    code = cli.main(["setup", "--advanced", "--lang", "en"])
+    code = cli.main(["setup", "--advanced", "--skip-skills", "--lang", "en"])
     captured = capsys.readouterr()
     prompt_text = "\n".join(prompts)
 
@@ -2537,7 +2537,7 @@ def test_setup_advanced_mode_keeps_low_level_prompts(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", fake_input)
     monkeypatch.setattr(cli.getpass, "getpass", fake_getpass)
 
-    code = cli.main(["setup", "--advanced", "--lang", "en"])
+    code = cli.main(["setup", "--advanced", "--skip-skills", "--lang", "en"])
 
     assert code == cli.EXIT_OK
     captured = capsys.readouterr()

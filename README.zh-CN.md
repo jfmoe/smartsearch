@@ -117,11 +117,14 @@ smart-search skills install
 smart-search skills install agents claude hermes "D:\AI Tools\skills"
 ```
 
-无参数时只选择 Agents Skill Target（`~/.agents/skills`）。内置名严格只有 `agents`、`claude`、
+无参数时只选择 Agents Skill Target（`~/.agents/skills`）。交互式 `smart-search setup` 使用相同默认值，
+并在最后的 Skill 提示中接受 `agents`、`claude`、`hermes` 与自定义 Skill Container。
+使用 `--skip-skills` 可让交互 setup 不写任何 Skill 并保留已有偏好；非交互 setup 永不改变 Skill 偏好。
+内置名严格只有 `agents`、`claude`、
 `hermes`；其他 positional 参数都是自定义 Skill Container。Smart Search 会追加 `smart-search-cli`
 子目录，将规范化的容器路径保存到 `config.json`，并保留现有 provider 配置。
 
-8. 升级 CLI 后，同步已经安装到全局 AI 工具里的 skill：
+8. 检查或手动修复已同步的 Skill：
 
 ```powershell
 smart-search skills status --format json
@@ -131,7 +134,14 @@ smart-search skills clear --format json
 
 `skills status` 和 `skills update` 只操作已保存的 Skill Installation Preference。`skills clear`
 通过保存空路径集合停止后续管理，但不卸载文件。更新会覆盖内置托管文件，但保留用户添加和已废弃的额外文件。
-provider setup 不会改变 Skill 偏好。
+除交互式 setup 中明确的 Skill 选择步骤外，provider setup 不会改变 Skill 偏好。
+
+Automatic Skill Sync 会在首次普通命令前比较当前 CLI 版本与最后完整同步版本；只要 CLI 版本字符串精确不等，
+无论升级、降级或切换 release channel，都会同步全部已保存容器；完全相等时不执行写入。后台成功保持静默，
+不会污染 JSON/content stdout。部分写入失败或有界锁等待超时会保持 pending，只把简洁修复指引写到标准错误输出，
+且不改变原命令的 stdout 或退出码；可运行 `smart-search skills update --format json` 修复。
+help、version、setup 和所有 `skills` 管理命令都会跳过后台同步。若 structured preference 缺失，
+首次普通命令只初始化 Agents Skill Target，不扫描或迁移 legacy 目录。
 
 ## 当前架构
 

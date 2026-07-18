@@ -261,3 +261,19 @@ def test_removed_selection_flags_fail_at_argparse_with_new_workflow_visible(argv
     assert error.value.code == 2
     assert "removed" in captured.err
     assert "smart-search skills install [TARGET_OR_PATH ...]" in captured.err
+
+
+def test_skills_management_reports_lock_path_failure_as_structured_error(tmp_path, capsys):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    cli.service.config._config_file = blocker / "child" / "config.json"
+
+    code = cli.main(["skills", "status", "--format", "json"])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+
+    assert code == cli.EXIT_RUNTIME_ERROR
+    assert result["ok"] is False
+    assert result["error_type"] == "runtime_error"
+    assert "Skill preference lock" in result["error"]
+    assert captured.err == ""

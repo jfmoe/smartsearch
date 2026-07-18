@@ -152,7 +152,7 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
         "`smart-search skills update --format json`",
         "`smart-search skills clear --format json`",
         "Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and",
-        "Provider setup never changes Skill preferences",
+        "Non-interactive setup never changes Skill preferences",
         "overwrites current bundled managed files",
         "rerun the affected smoke until it passes or is proven to be an external provider blocker",
         "Budget limits must not break evidence policy",
@@ -317,6 +317,37 @@ def test_context7_remote_mcp_docs_and_skill_reject_old_rest_examples():
 
 def test_deep_research_shared_skill_files_are_synchronized():
     assert _skill_text_files(PUBLIC_SKILL_DIR) == _skill_text_files(PACKAGED_SKILL_DIR)
+
+
+def test_automatic_skill_sync_and_guided_setup_are_documented():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    public_text = _read_skill_tree(PUBLIC_SKILL_DIR)
+    packaged_text = _read_skill_tree(PACKAGED_SKILL_DIR)
+    english_markers = [
+        "Automatic Skill Sync",
+        "exact CLI version string",
+        "first ordinary command",
+        "standard error",
+        "smart-search skills update",
+        "--skip-skills",
+        "Non-interactive setup never changes Skill preferences",
+    ]
+    chinese_markers = [
+        "Automatic Skill Sync",
+        "CLI 版本字符串精确不等",
+        "首次普通命令",
+        "标准错误输出",
+        "smart-search skills update",
+        "--skip-skills",
+        "非交互 setup 永不改变 Skill 偏好",
+    ]
+    for marker in english_markers:
+        assert marker in readme
+        assert marker in public_text
+        assert marker in packaged_text
+    for marker in chinese_markers:
+        assert marker in readme_zh
 
 
 def test_zhipu_setup_contract_public_and_packaged_assets_match():
