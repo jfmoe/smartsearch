@@ -326,6 +326,7 @@ def _empty_search_result(
         "primary_sources_count": 0,
         "extra_sources": [],
         "extra_sources_count": 0,
+        "vertical_discovery": None,
         "source_warning": "",
         "routing_decision": {},
         "providers_used": [],
@@ -502,6 +503,17 @@ def _normalize_source_results(results: list[dict] | None, provider: str) -> list
         if source:
             out["source"] = source
         normalized.append(out)
+    return normalized
+
+
+def _normalize_vertical_discovery_sources(results: list[dict] | None) -> list[dict]:
+    """Promote only canonical HTTP(S) candidates from Vertical Discovery."""
+    normalized: list[dict] = []
+    for item in _normalize_source_results(results, "anysearch"):
+        parsed = urlparse(item["url"])
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+            continue
+        normalized.append(item)
     return normalized
 
 
@@ -1232,6 +1244,7 @@ async def research(
     routes = _research_capability_routes(question, plan, fallback_mode, route_result=route_result)
     provider_attempts: list[dict[str, Any]] = []
     discovery_sources: list[dict[str, Any]] = []
+    vertical_discovery_result: dict[str, Any] | None = None
     evidence_items: list[dict[str, Any]] = []
     stage_results: list[dict[str, Any]] = []
     gaps: list[dict[str, Any]] = []
@@ -1344,15 +1357,18 @@ async def research(
             provider_attempts.append(_attempt("docs_search", "exa", "error", exa_start, error_type=data.get("error_type", ""), error=data.get("error", "")))
 
     if signals["vertical_intent"] and routes["capabilities"]["vertical_search"]["providers"]:
-        vertical_start = time.time()
-        data = await anysearch_search(question, max_results=5)
-        if data.get("ok"):
-            sources = _normalize_source_results(data.get("results"), "anysearch")
-            provider_attempts.append(_attempt("vertical_search", "anysearch", "ok" if sources else "empty", vertical_start, result_count=len(sources)))
-            discovery_sources.extend(sources)
-            stage_results.append({"stage": "vertical_discovery", "provider": "anysearch", "ok": bool(sources), "result_count": len(sources)})
-        else:
-            provider_attempts.append(_attempt("vertical_search", "anysearch", "error", vertical_start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+        sources, attempts, vertical_discovery_result = await _run_vertical_search_fallback(question)
+        provider_attempts.extend(attempts)
+        discovery_sources.extend(sources)
+        stage_results.append(
+            {
+                "stage": "vertical_discovery",
+                "provider": "anysearch",
+                "ok": bool(vertical_discovery_result and vertical_discovery_result.get("ok")),
+                "result_count": len(sources),
+                "provider_result": vertical_discovery_result,
+            }
+        )
 
     candidates = _select_candidate_urls(discovery_sources, limit=6)
     fetched_urls = {item.get("url") for item in evidence_items}
@@ -1402,6 +1418,7 @@ async def research(
         "routing_decision": routes,
         "stage_results": stage_results,
         "discovery_sources": discovery_sources,
+        "vertical_discovery": vertical_discovery_result,
         "final_answer": final_answer,
         "content": final_answer,
         "citations": citations,
@@ -1839,7 +1856,7 @@ async def _run_vertical_search_fallback(
     query: str,
     providers: str = "auto",
     fallback: str = "auto",
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], dict[str, Any] | None]:
     provider_filter = _parse_provider_filter(providers)
     attempts: list[dict] = []
     configured: list[str] = []
@@ -1854,16 +1871,62 @@ async def _run_vertical_search_fallback(
         start = time.time()
         try:
             data = await anysearch_search(query, max_results=5)
+            attempt_extra = {
+                "operation": data.get("operation", "vertical_discovery"),
+                "tool": data.get("tool", "search"),
+                "experimental": True,
+            }
             if data.get("ok"):
-                sources = _normalize_source_results(data.get("results"), "anysearch")
-                if sources:
-                    attempts.append(_attempt("vertical_search", provider, "ok", start, result_count=len(sources)))
-                    return sources, attempts
+                sources = _normalize_vertical_discovery_sources(data.get("results"))
+                attempts.append(
+                    _attempt(
+                        "vertical_search",
+                        provider,
+                        "ok",
+                        start,
+                        result_count=len(sources),
+                        extra=attempt_extra,
+                    )
+                )
+                return sources, attempts, data
             status = "error" if data.get("error_type") in {"auth_error", "provider_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
-            attempts.append(_attempt("vertical_search", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+            attempts.append(
+                _attempt(
+                    "vertical_search",
+                    provider,
+                    status,
+                    start,
+                    error_type=data.get("error_type", ""),
+                    error=data.get("error", ""),
+                    extra=attempt_extra,
+                )
+            )
+            return [], attempts, data
         except Exception as e:
-            attempts.append(_attempt("vertical_search", provider, "error", start, error_type="runtime_error", error=str(e)))
-    return [], attempts
+            data = {
+                "ok": False,
+                "provider": "anysearch",
+                "capability": "vertical_search",
+                "experimental": True,
+                "operation": "vertical_discovery",
+                "tool": "search",
+                "error_type": "runtime_error",
+                "error": str(e),
+                "results": [],
+            }
+            attempts.append(
+                _attempt(
+                    "vertical_search",
+                    provider,
+                    "error",
+                    start,
+                    error_type="runtime_error",
+                    error=str(e),
+                    extra={"operation": "vertical_discovery", "tool": "search", "experimental": True},
+                )
+            )
+            return [], attempts, data
+    return [], attempts, None
 
 
 async def call_tavily_extract(url: str) -> str | None:
@@ -2247,6 +2310,7 @@ async def search(
         result["transport_fallback_used"] = transport_fallback_used
         result["model_fallback_used"] = model_fallback_used
         result["routing_decision"] = routing_decision
+        result["vertical_discovery"] = None
         result["validation_level"] = validation_level
         result["minimum_profile_ok"] = minimum.get("ok", False)
         result["capability_status"] = minimum.get("capability_status", {})
@@ -2280,6 +2344,7 @@ async def search(
             provider_attempts.append(_attempt("web_search", item_provider, "ok", start, result_count=len(results)))
 
     supplemental_sources: list[dict] = []
+    vertical_discovery_result: dict[str, Any] | None = None
     if validation_level in {"balanced", "strict"}:
         if "docs_search" in supplemental_paths:
             docs_sources, docs_attempts = await _run_docs_search_fallback(query, providers=providers, fallback=fallback_mode)
@@ -2296,7 +2361,11 @@ async def search(
             if fetch_result:
                 supplemental_sources.append({"url": fetch_result["url"], "provider": fetch_result["provider"], "description": fetch_result["content"][:300]})
         if "vertical_search" in supplemental_paths:
-            vertical_sources, vertical_attempts = await _run_vertical_search_fallback(query, providers=providers, fallback=fallback_mode)
+            vertical_sources, vertical_attempts, vertical_discovery_result = await _run_vertical_search_fallback(
+                query,
+                providers=providers,
+                fallback=fallback_mode,
+            )
             provider_attempts.extend(vertical_attempts)
             supplemental_sources.extend(vertical_sources)
 
@@ -2321,6 +2390,7 @@ async def search(
         "primary_sources_count": len(primary_sources),
         "extra_sources": extra_source_items,
         "extra_sources_count": len(extra_source_items),
+        "vertical_discovery": vertical_discovery_result,
         "source_warning": SOURCE_PROVENANCE_WARNING if extra_source_items else "",
         "routing_decision": routing_decision,
         "providers_used": _provider_names_from_attempts(provider_attempts),

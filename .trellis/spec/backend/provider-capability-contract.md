@@ -227,8 +227,10 @@ Provider configuration:
   `OPENAI_COMPATIBLE_*`.
 - `ANYSEARCH_API_URL` configures the experimental AnySearch JSON-RPC endpoint
   and defaults to `https://api.anysearch.com/mcp`.
-- `ANYSEARCH_API_KEY` is optional. When present, AnySearch requests send
-  `Authorization: Bearer <key>`; when absent, requests are anonymous.
+- `ANYSEARCH_API_KEY` is optional for the explicit AnySearch Acceptance
+  Surface. When present, requests send `Authorization: Bearer <key>` and
+  AnySearch becomes configured for automatic Vertical Discovery; when absent,
+  only explicit `anysearch-*` requests may try anonymously.
 - `ANYSEARCH_TIMEOUT_SECONDS` configures the AnySearch HTTP timeout and
   defaults to `30`.
 - `ZHIPU_API_KEY` registers the `zhipu` web-search provider.
@@ -365,11 +367,27 @@ Intent router contract:
 
 AnySearch boundary:
 
-- AnySearch is an experimental `vertical_search` provider exposed only through
-  explicit `anysearch-*` CLI commands and capability diagnostics.
+- AnySearch is an experimental `vertical_search` provider exposed through the
+  explicit `anysearch-*` Acceptance Surface, capability diagnostics, and
+  domain-less automatic Vertical Discovery. It remains outside the standard
+  minimum profile.
+- Default `search` runs automatic Vertical Discovery only after main-search
+  success, under `balanced`/`strict`, when the intent route includes
+  `vertical_search`, the provider filter allows AnySearch, and
+  `ANYSEARCH_API_KEY` is configured. `research` uses the same domain-less
+  request when its balanced intent route selects `vertical_search` and
+  configured AnySearch is available.
+- Automatic calls must send only `query` and `max_results`; Smart Search must
+  not choose domain/sub-domain or construct sub-domain parameters. Only
+  normalized HTTP(S) candidates may become discovery sources. URL-less
+  structured results remain provider output and are not source/evidence.
+- `--extra-sources 0` controls Tavily/Firecrawl only and does not disable an
+  otherwise eligible Vertical Discovery call. AnySearch failure must preserve
+  provider attempt, operation, tool, and error category without failing a
+  successful main-search result.
 - Do not insert AnySearch into `web_search`, `docs_search`, `web_fetch`, or
   `main_search` fallback chains without a separate acceptance/routing task.
-- AnySearch uses JSON-RPC 2.0 `tools/call` with tool names `list_domains`,
+- AnySearch uses JSON-RPC 2.0 `tools/call` with tool names `get_sub_domains`,
   `search`, `extract`, and `batch_search`.
 - AnySearch search/extract results must preserve raw markdown/text content.
   URL/title/snippet candidates should be extracted when present, but

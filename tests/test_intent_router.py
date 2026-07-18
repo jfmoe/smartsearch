@@ -45,6 +45,42 @@ async def test_route_keeps_zh_current_field_narrow_for_english_current_queries(m
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "academic papers about retrieval augmented generation",
+        "查一下 Elden Ring 的游戏攻略",
+        "东京自由行路线和酒店推荐",
+    ],
+)
+async def test_rules_route_recognizes_minimal_vertical_discovery_intents(monkeypatch, query):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
+
+    result = await service.route(query)
+
+    assert result["required_capabilities"] == ["vertical_search"]
+    assert result["intent_signals"]["vertical_intent"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "帮我解释这个 Python 函数",
+        "给团队设计一个积分游戏",
+        "这段文字读起来像一次心灵旅行",
+    ],
+)
+async def test_new_vertical_rules_do_not_match_ordinary_queries(monkeypatch, query):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
+
+    result = await service.route(query)
+
+    assert "vertical_search" not in result["required_capabilities"]
+    assert result["intent_signals"]["vertical_intent"] is False
+
+
+@pytest.mark.asyncio
 async def test_search_routing_decision_keeps_old_fields_and_adds_new_router_fields(monkeypatch):
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")

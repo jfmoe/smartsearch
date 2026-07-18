@@ -123,6 +123,21 @@ VERTICAL_INTENT_KEYWORDS = {
     "代码",
     "代码库",
     "开源仓库",
+    # Keep automatic Vertical Discovery intentionally narrow. These phrases
+    # identify gaming/travel lookup intent without treating ordinary uses of
+    # “game” or “travel” as vertical searches.
+    "game guide",
+    "game walkthrough",
+    "gaming guide",
+    "游戏攻略",
+    "游戏资料",
+    "游戏数据库",
+    "travel itinerary",
+    "travel guide",
+    "trip itinerary",
+    "旅行攻略",
+    "旅游攻略",
+    "自由行路线",
 }
 
 CAPABILITY_UTTERANCES: dict[str, list[str]] = {
@@ -156,6 +171,8 @@ CAPABILITY_UTTERANCES: dict[str, list[str]] = {
         "GitHub codebase search",
         "漏洞影响范围",
         "垂直领域结构化检索",
+        "Elden Ring game walkthrough",
+        "Tokyo travel itinerary",
     ],
 }
 
@@ -255,6 +272,8 @@ ROUTE_CALIBRATION_QUERIES: dict[str, list[str]] = {
         "repository search for Dockerfile examples",
         "法律法规 检索 个税",
         "数据库里查 CVE exploit score",
+        "Elden Ring game walkthrough boss guide",
+        "东京自由行路线和酒店攻略",
     ],
     "none": [
         "帮我把这句话翻译成英文",

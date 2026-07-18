@@ -327,7 +327,7 @@ async def test_anysearch_explicit_search_rejects_migration_and_parameter_errors_
 
 
 @pytest.mark.asyncio
-async def test_anysearch_general_search_is_vertical_discovery(monkeypatch):
+async def test_anysearch_automatic_vertical_discovery_transport_is_domainless(monkeypatch):
     FakeAnySearchClient.response = httpx.Response(
         200,
         json={"jsonrpc": "2.0", "id": 1, "result": {"content": []}},
@@ -335,10 +335,12 @@ async def test_anysearch_general_search_is_vertical_discovery(monkeypatch):
     )
     monkeypatch.setattr("smart_search.providers.anysearch.httpx.AsyncClient", FakeAnySearchClient)
 
-    data = await AnySearchProvider("https://api.anysearch.com/mcp").vertical_search("travel ideas")
+    data = await AnySearchProvider("https://api.anysearch.com/mcp", "as-test-secret").vertical_search("travel ideas")
 
     assert data["operation"] == "vertical_discovery"
     assert data["schema_validation"]["status"] == "not_applicable"
+    assert FakeAnySearchClient.calls[0]["headers"]["Authorization"] == "Bearer as-test-secret"
+    assert FakeAnySearchClient.calls[0]["json"]["params"]["name"] == "search"
     assert FakeAnySearchClient.calls[0]["json"]["params"]["arguments"] == {
         "query": "travel ideas",
         "max_results": 5,

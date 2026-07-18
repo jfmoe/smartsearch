@@ -177,9 +177,13 @@ Fallback is same-capability only:
 
 AnySearch is intentionally not part of the `web_search` fallback chain and is not required by the `standard` minimum profile. Only domain-less Vertical Discovery belongs to the `vertical_search` Capability Seam. Domain Discovery, Batch Discovery, and AnySearch Extraction remain provider acceptance operations; extraction is not Web Fetch. Use the explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
 
+Default `search` runs automatic Vertical Discovery only after the main search succeeds, validation is `balanced` or `strict`, the local router identifies vertical intent, the provider filter allows AnySearch, and `ANYSEARCH_API_KEY` is configured. `research` reuses the same domain-less semantics when its balanced intent route selects `vertical_search` and configured AnySearch is available; it has no separate provider-filter flag or main-search gate. The key therefore means both Configured AnySearch and permission for either automatic path; without it, only explicit AnySearch Acceptance Surface commands may try anonymously. Automatic calls always use domain-less `search`: Smart Search does not select a domain/sub-domain or construct Sub-domain Parameters. `--extra-sources 0` disables only Tavily/Firecrawl horizontal extras in `search` and does not disable an otherwise eligible Vertical Discovery call.
+
+Only normalized HTTP(S) candidates from Vertical Discovery enter `extra_sources`. URL-less structured responses remain under `vertical_discovery` as the provider result and are never presented as a source, citation, or evidence. Provider failures remain observable through `vertical_discovery` and `provider_attempts` (`operation`, upstream `tool`, and error category) without changing a successful main result. Domain-less responses do not claim or verify a domain. The focused local regression intents include academic, gaming-guide, and travel-itinerary queries; ordinary mentions of games or metaphorical travel do not match.
+
 Jina Reader is a `web_fetch` provider only. `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`; anonymous `r.jina.ai` behavior is treated as explicit/experimental fetch behavior and must not weaken fail-closed setup checks.
 
-The CLI exposes observability fields such as `routing_decision`, `provider_attempts`, `providers_used`, `fallback_used`, `primary_sources`, `extra_sources`, and `source_warning`.
+The CLI exposes observability fields such as `routing_decision`, `provider_attempts`, `providers_used`, `fallback_used`, `primary_sources`, `extra_sources`, `vertical_discovery`, and `source_warning`.
 
 `routing_decision` keeps backward-compatible booleans such as `docs_intent`, `zh_current_intent`, `web_current_intent`, `fetch_intent`, and `supplemental_paths`, and also includes the unified router fields: `intent_router_mode`, `required_capabilities`, `intent_signals`, `confidence`, `router_engines_used`, and `degraded_reason`.
 
@@ -241,7 +245,7 @@ The research router is capability-first plus provider-advantage:
 - Zhipu Coding Plan MCP remains a separate quota route through `web_search_prime` and `webReader`.
 - Jina is favored for known public URLs, PDFs, and arXiv extraction; ReaderLM-v2 still requires `JINA_API_KEY`.
 - Firecrawl is favored for JS-heavy, dynamic, browser-like, OCR/PDF, or robust fallback extraction.
-- AnySearch participates only when vertical intent is clear, such as CVE, finance, legal, academic, or codebase/repository searches.
+- AnySearch participates only when vertical intent is clear, including the focused academic, gaming-guide, and travel-itinerary regression rules as well as existing CVE, finance, legal, or codebase/repository signals. It always performs domain-less Vertical Discovery; upstream chooses its internal data source.
 
 Advanced routing overrides are available through `SMART_SEARCH_RESEARCH_PREFERRED_PROVIDERS` and `SMART_SEARCH_RESEARCH_DISABLED_PROVIDERS`. They can reorder or disable registered providers inside their supported capability, but they cannot move a provider across capability boundaries.
 

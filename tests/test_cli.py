@@ -815,6 +815,36 @@ def test_markdown_search_labels_primary_and_extra_sources(monkeypatch, capsys):
     assert "extra_sources are retrieved in parallel" in out
 
 
+def test_markdown_search_exposes_structured_vertical_discovery_without_source_link(monkeypatch, capsys):
+    async def fake_search(query, platform="", model="", extra_sources=0, validation="", fallback="", providers="auto"):
+        return {
+            "ok": True,
+            "content": "Main answer.",
+            "primary_sources": [],
+            "extra_sources": [],
+            "sources": [],
+            "vertical_discovery": {
+                "ok": True,
+                "operation": "vertical_discovery",
+                "tool": "search",
+                "experimental": True,
+                "results": [{"url": "", "description": "candidate only"}],
+                "raw_result": {"structuredContent": {"candidate": "paper"}},
+            },
+        }
+
+    monkeypatch.setattr(cli.service, "search", fake_search)
+
+    code = cli.main(["search", "academic paper retrieval", "--validation", "balanced", "--format", "markdown"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "## Vertical Discovery" in out
+    assert "`vertical_discovery`" in out
+    assert "Structured provider result (not source/evidence)" in out
+    assert "[candidate only](" not in out
+
+
 def test_config_error_exit_code(monkeypatch, capsys):
     async def fake_doctor():
         return {"ok": False, "error_type": "config_error", "XAI_API_KEY": "未配置"}

@@ -842,6 +842,28 @@ def _format_skills_markdown(data: dict[str, Any]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _append_vertical_discovery_markdown(lines: list[str], result: dict[str, Any] | None) -> None:
+    if not result:
+        return
+    lines.extend(
+        [
+            "\n## Vertical Discovery",
+            f"- Status: {_status_label(result.get('ok'))}",
+            f"- Operation: `{result.get('operation', 'vertical_discovery')}`",
+            f"- Tool: `{result.get('tool', 'search')}`",
+            "- Experimental: yes",
+        ]
+    )
+    url_results = [item for item in result.get("results") or [] if (item.get("url") or "").strip()]
+    if result.get("ok") and not url_results:
+        structured = result.get("raw_result") or result.get("raw_content") or result.get("results")
+        if structured:
+            rendered = structured if isinstance(structured, str) else json.dumps(structured, ensure_ascii=False, indent=2)
+            lines.extend(["", "Structured provider result (not source/evidence):", *_markdown_code_block(rendered)])
+    if result.get("error") or result.get("error_type"):
+        lines.extend(_error_lines(result))
+
+
 def _format_markdown(command: str, data: dict[str, Any]) -> str:
     if command == "search":
         if not data.get("ok", False) and (data.get("error") or data.get("error_type")):
@@ -880,6 +902,7 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
                     url = item.get("url", "")
                     title = item.get("title") or item.get("provider") or url
                     lines.append(f"- [{title}]({url})")
+            _append_vertical_discovery_markdown(lines, data.get("vertical_discovery"))
             return "\n".join(lines).strip() + "\n"
 
         sources = data.get("sources") or []
@@ -889,6 +912,7 @@ def _format_markdown(command: str, data: dict[str, Any]) -> str:
                 url = item.get("url", "")
                 title = item.get("title") or item.get("provider") or url
                 lines.append(f"- [{title}]({url})")
+        _append_vertical_discovery_markdown(lines, data.get("vertical_discovery"))
         return "\n".join(lines).strip() + "\n"
     if command == "fetch":
         return (data.get("content") or "") + ("\n" if data.get("content") else "")
@@ -2758,7 +2782,12 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query")
     search_parser.add_argument("--platform", default="")
     search_parser.add_argument("--model", default="")
-    search_parser.add_argument("--extra-sources", type=int, default=0)
+    search_parser.add_argument(
+        "--extra-sources",
+        type=int,
+        default=0,
+        help="Tavily/Firecrawl extra candidate count; 0 does not disable eligible Vertical Discovery.",
+    )
     search_parser.add_argument("--validation", choices=["fast", "balanced", "strict"], default="")
     search_parser.add_argument("--fallback", choices=["auto", "off"], default="")
     search_parser.add_argument("--providers", default="auto")

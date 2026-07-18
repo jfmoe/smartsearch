@@ -1813,6 +1813,224 @@ async def test_anysearch_service_wrappers_preserve_structured_provider_results(m
     ]
 
 
+def _configure_vertical_discovery_search(monkeypatch, *, anysearch_key=True):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-secret")
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
+    if anysearch_key:
+        monkeypatch.setenv("ANYSEARCH_API_KEY", "anysearch-secret")
+
+
+@pytest.mark.asyncio
+async def test_search_vertical_discovery_runs_after_main_success_with_extra_sources_zero(monkeypatch):
+    _configure_vertical_discovery_search(monkeypatch)
+    calls = []
+
+    async def fake_main(self, query, platform="", ctx=None):
+        return 'Main answer.\n\nsources([{"url":"https://primary.example.com"}])'
+
+    async def fake_anysearch(query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+        calls.append((query, domain, sub_domain, sub_domain_params))
+        return {
+            "ok": True,
+            "provider": "anysearch",
+            "operation": "vertical_discovery",
+            "tool": "search",
+            "experimental": True,
+            "results": [{"url": "https://game.example.com/guide", "title": "Guide"}],
+            "raw_result": {"structuredContent": {"route": "upstream-selected"}},
+        }
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_main)
+    monkeypatch.setattr(service, "anysearch_search", fake_anysearch)
+
+    result = await service.search(
+        "Elden Ring 游戏攻略",
+        validation="balanced",
+        extra_sources=0,
+        providers="openai-compatible,anysearch",
+    )
+
+    assert result["ok"] is True
+    assert calls == [("Elden Ring 游戏攻略", "", "", None)]
+    assert result["extra_sources"] == [
+        {"url": "https://game.example.com/guide", "provider": "anysearch", "title": "Guide"}
+    ]
+    assert result["vertical_discovery"]["operation"] == "vertical_discovery"
+    assert result["vertical_discovery"]["raw_result"]["structuredContent"]["route"] == "upstream-selected"
+    attempt = next(item for item in result["provider_attempts"] if item["provider"] == "anysearch")
+    assert (attempt["operation"], attempt["tool"], attempt["status"]) == ("vertical_discovery", "search", "ok")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "validation", "providers", "with_key"),
+    [
+        ("东京旅行攻略", "fast", "auto", True),
+        ("东京旅行攻略", "balanced", "openai-compatible", True),
+        ("东京旅行攻略", "balanced", "auto", False),
+        ("给团队设计一个积分游戏", "balanced", "auto", True),
+    ],
+)
+async def test_search_vertical_discovery_requires_all_gates(monkeypatch, query, validation, providers, with_key):
+    _configure_vertical_discovery_search(monkeypatch, anysearch_key=with_key)
+
+    async def fake_main(self, query, platform="", ctx=None):
+        return 'Main answer.\n\nsources([{"url":"https://primary.example.com"}])'
+
+    async def should_not_call(*args, **kwargs):
+        raise AssertionError("Vertical Discovery gate should prevent this call")
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_main)
+    monkeypatch.setattr(service, "anysearch_search", should_not_call)
+
+    result = await service.search(query, validation=validation, providers=providers)
+
+    assert result["ok"] is True
+    assert result["vertical_discovery"] is None
+    assert all(item["provider"] != "anysearch" for item in result["provider_attempts"])
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_structured_vertical_result_without_faking_source(monkeypatch):
+    _configure_vertical_discovery_search(monkeypatch)
+
+    async def fake_main(self, query, platform="", ctx=None):
+        return 'Main answer.\n\nsources([{"url":"https://primary.example.com"}])'
+
+    async def fake_anysearch(*args, **kwargs):
+        return {
+            "ok": True,
+            "provider": "anysearch",
+            "operation": "vertical_discovery",
+            "tool": "search",
+            "experimental": True,
+            "results": [{"url": "", "description": "upstream structured candidate", "evidence_type": "structured"}],
+            "raw_result": {"structuredContent": {"answer": "candidate only"}},
+        }
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_main)
+    monkeypatch.setattr(service, "anysearch_search", fake_anysearch)
+
+    result = await service.search("academic paper retrieval", validation="strict")
+
+    assert result["ok"] is True
+    assert result["extra_sources"] == []
+    assert result["sources"] == [{"url": "https://primary.example.com"}]
+    assert result["vertical_discovery"]["results"][0]["evidence_type"] == "structured"
+    assert result["vertical_discovery"]["raw_result"]["structuredContent"] == {"answer": "candidate only"}
+
+
+@pytest.mark.asyncio
+async def test_search_vertical_failure_is_observable_without_breaking_main_result(monkeypatch):
+    _configure_vertical_discovery_search(monkeypatch)
+
+    async def fake_main(self, query, platform="", ctx=None):
+        return 'Main answer.\n\nsources([{"url":"https://primary.example.com"}])'
+
+    async def fake_anysearch(*args, **kwargs):
+        return {
+            "ok": False,
+            "provider": "anysearch",
+            "operation": "vertical_discovery",
+            "tool": "search",
+            "experimental": True,
+            "error_type": "provider_error",
+            "error": "upstream unavailable",
+            "results": [],
+        }
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_main)
+    monkeypatch.setattr(service, "anysearch_search", fake_anysearch)
+
+    result = await service.search("东京自由行路线", validation="balanced")
+
+    assert result["ok"] is True
+    assert result["content"] == "Main answer."
+    attempt = next(item for item in result["provider_attempts"] if item["provider"] == "anysearch")
+    assert (attempt["status"], attempt["operation"], attempt["tool"], attempt["error_type"]) == (
+        "error",
+        "vertical_discovery",
+        "search",
+        "provider_error",
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_run_vertical_discovery_when_main_search_fails(monkeypatch):
+    _configure_vertical_discovery_search(monkeypatch)
+
+    async def failing_main(self, query, platform="", ctx=None):
+        raise RuntimeError("main unavailable")
+
+    async def should_not_call(*args, **kwargs):
+        raise AssertionError("Vertical Discovery must wait for main_search success")
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", failing_main)
+    monkeypatch.setattr(service, "anysearch_search", should_not_call)
+
+    result = await service.search("Elden Ring 游戏攻略", validation="balanced")
+
+    assert result["ok"] is False
+    assert result["vertical_discovery"] is None
+    assert all(item["provider"] != "anysearch" for item in result["provider_attempts"])
+
+
+@pytest.mark.asyncio
+async def test_research_vertical_discovery_is_domainless_and_preserves_structured_result(monkeypatch, tmp_path):
+    _configure_research_minimum(monkeypatch)
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "anysearch-secret")
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
+    calls = []
+
+    async def fake_anysearch(query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+        calls.append((query, domain, sub_domain, sub_domain_params))
+        return {
+            "ok": True,
+            "provider": "anysearch",
+            "operation": "vertical_discovery",
+            "tool": "search",
+            "experimental": True,
+            "results": [{"url": "", "description": "structured candidate"}],
+            "raw_result": {"structuredContent": {"candidate": "paper"}},
+        }
+
+    async def no_web_sources(*args, **kwargs):
+        return [], []
+
+    monkeypatch.setattr(service, "anysearch_search", fake_anysearch)
+    monkeypatch.setattr(service, "_run_web_search_fallback", no_web_sources)
+
+    result = await service.research("academic paper retrieval", evidence_dir=str(tmp_path))
+
+    assert calls == [("academic paper retrieval", "", "", None)]
+    assert result["vertical_discovery"]["operation"] == "vertical_discovery"
+    assert result["vertical_discovery"]["raw_result"]["structuredContent"] == {"candidate": "paper"}
+    assert result["discovery_sources"] == []
+    assert result["evidence_items"] == []
+
+
+@pytest.mark.asyncio
+async def test_research_does_not_run_vertical_discovery_without_api_key(monkeypatch, tmp_path):
+    _configure_research_minimum(monkeypatch)
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
+
+    async def should_not_call(*args, **kwargs):
+        raise AssertionError("research requires Configured AnySearch for automatic Vertical Discovery")
+
+    async def no_web_sources(*args, **kwargs):
+        return [], []
+
+    monkeypatch.setattr(service, "anysearch_search", should_not_call)
+    monkeypatch.setattr(service, "_run_web_search_fallback", no_web_sources)
+
+    result = await service.research("academic paper retrieval", evidence_dir=str(tmp_path))
+
+    assert result["vertical_discovery"] is None
+    assert result["routing_decision"]["capabilities"]["vertical_search"]["providers"] == []
+    assert all(item["provider"] != "anysearch" for item in result["provider_attempts"])
+
+
 @pytest.mark.asyncio
 async def test_anysearch_domains_preserves_provider_parameter_error(monkeypatch):
     class FakeAnySearchProvider:
