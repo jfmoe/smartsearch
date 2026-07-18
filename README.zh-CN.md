@@ -62,7 +62,9 @@ npm install -g @jfmoe/smart-search@next
 smart-search --version
 ```
 
-npm 包安装时会自动创建隔离的 Python 运行环境。你平时只需要使用 `smart-search` 这个命令。
+npm 包安装时会自动创建隔离的 Python 运行环境。npm 或其他包管理器安装不会写入 Skill Container；
+你平时只需要使用 `smart-search` 这个命令。CLI 版本变化时，同步发生在版本变化后的首次普通 CLI 调用，
+而不是包安装阶段。
 
 前置条件：
 

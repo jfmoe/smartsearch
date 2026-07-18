@@ -147,6 +147,33 @@ def test_public_docs_describe_the_personal_mac_only_release_line() -> None:
         assert marker in text
 
 
+def test_packaged_install_guidance_defers_skill_container_writes_to_first_use() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_zh = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    public_contract = (
+        ROOT / "skills" / "smart-search-cli" / "references" / "setup-config.md"
+    ).read_text(encoding="utf-8")
+
+    for marker in [
+        "Package installation does not write Skill Containers",
+        "first ordinary CLI invocation after a version change",
+    ]:
+        assert marker in readme
+        assert marker in public_contract
+    for marker in [
+        "npm 或其他包管理器安装不会写入 Skill Container",
+        "版本变化后的首次普通 CLI 调用",
+    ]:
+        assert marker in readme_zh
+
+    for schema_field in [
+        "`skills.schema_version`",
+        "`skills.paths`",
+        "`skills.last_synced_cli_version`",
+    ]:
+        assert schema_field in public_contract
+
+
 def test_publish_workflow_has_separate_test_preview_and_stable_lanes() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     jobs = workflow.split("\njobs:\n", 1)[1]

@@ -46,6 +46,7 @@
 
 ## Skill Installation Sync
 
+- The active `config.json` stores `skills.schema_version`, the authoritative normalized `skills.paths` array, and `skills.last_synced_cli_version`. Provider keys remain unchanged. Missing Skill configuration initializes the default Agents Skill Target on first ordinary use; unsupported or malformed schemas fail explicit Skill commands.
 - `smart-search skills install [TARGET_OR_PATH ...]` installs the bundled `smart-search-cli` child Skill and completely replaces the saved Skill Installation Preference. With no arguments it selects only `agents` (`~/.agents/skills`).
 - The only built-in names are `agents`, `claude`, and `hermes`, resolving to `~/.agents/skills`, `~/.claude/skills`, and `~/.hermes/skills`. Other positional arguments are custom Skill Container paths and can be mixed with built-ins.
 - Saved paths are expanded, made absolute, lexically normalized, and platform-deduplicated without resolving symlinks. Empty paths, filesystem roots, and existing non-directories are rejected before Skill writes.
@@ -56,6 +57,7 @@
 - When structured Skill preferences are absent, the first ordinary command initializes only the Agents Skill Target and attempts synchronization. It must not scan, infer, or migrate legacy installation directories.
 - Successful Automatic Skill Sync is silent. Failure or a bounded background lock timeout remains pending, writes repair guidance only to standard error, and does not alter the requested command's stdout, execution, or exit code. Use `smart-search skills update --format json` for explicit repair.
 - Help, version, setup, and every `skills` management command skip background synchronization. Configuration and managed Skill writes are atomically replaced and cross-process preference changes are serialized.
+- Package installation does not write Skill Containers. Automatic Skill Sync begins only on the first ordinary CLI invocation after a version change; package-manager hooks install or repair the CLI runtime only.
 - Provider setup outside the interactive Skill prompt never changes Skill preferences. Skill management must not create Trellis files, hooks, agents, or commands, modify provider keys, or delete leftover files.
 
 ## Provider Endpoint Setup

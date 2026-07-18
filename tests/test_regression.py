@@ -13,7 +13,7 @@ def test_regression_does_not_create_repo_log_file():
 
 
 def test_smart_search_skill_contract_enforces_cli_first():
-    skill_dir = Path.home() / ".codex" / "skills" / "smart-search-cli"
+    skill_dir = Path.home() / ".agents" / "skills" / "smart-search-cli"
     if not skill_dir.exists():
         return
     skill_files = [

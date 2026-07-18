@@ -62,7 +62,9 @@ npm install -g @jfmoe/smart-search@next
 smart-search --version
 ```
 
-The npm package creates an isolated Python runtime during install. You still use the single `smart-search` command.
+The npm package creates an isolated Python runtime during install. Package installation does not write Skill Containers;
+you still use the single `smart-search` command. Synchronization happens on the first ordinary CLI invocation after a version change,
+not during npm or another package-manager install.
 
 Prerequisites:
 
