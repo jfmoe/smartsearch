@@ -50,6 +50,6 @@ Select the first branch whose condition matches the user's task. Load only the c
 ## Cross-branch invariants
 
 - **CLI-first:** use the local `smart-search` CLI for this workflow and never silently switch to a native or unrelated web-search route.
-- **Capability-safe fallback:** fallback may try only another provider in the same capability; never substitute a docs, broad-search, or page-fetch provider across capability boundaries.
+- **Capability-safe fallback:** fallback may try only another provider in the same capability; never substitute a docs, broad-search, or page-fetch provider across capability boundaries. Keep AnySearch Domain Discovery, explicit domain search, Batch Discovery, and AnySearch Extraction behind explicit commands; only domain-less Vertical Discovery may participate in `vertical_search`, and none is Web Search/Web Fetch or a standard-profile requirement.
 - **Fetched evidence for consequential claims:** for high-risk or time-sensitive facts, fetch the key pages before making claim-level statements and summarize only what the fetched text supports.
 - **Safe, explicit failures:** never put API keys in output, logs, evidence, or errors; mask secrets and explicitly report every failed command with actionable recovery guidance.

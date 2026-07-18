@@ -116,7 +116,7 @@ def test_command_aliases_parse_to_canonical_commands():
         (["zmcp-doc", "owner/repo", "install"], "zhipu-mcp-search-doc"),
         (["zmcp-tree", "owner/repo"], "zhipu-mcp-repo-structure"),
         (["zmcp-file", "owner/repo", "README.md"], "zhipu-mcp-read-file"),
-        (["as-domains"], "anysearch-domains"),
+        (["as-domains", "security"], "anysearch-domains"),
         (["as-search", "query"], "anysearch-search"),
         (["as", "query"], "anysearch-search"),
         (["as-extract", "https://example.com"], "anysearch-extract"),
@@ -2303,10 +2303,10 @@ def test_anysearch_commands_use_service_wrappers(monkeypatch, capsys):
 
     async def fake_domains(domain=""):
         calls.append(("domains", domain))
-        return {"ok": True, "provider": "anysearch", "tool": "list_domains", "results": []}
+        return {"ok": True, "provider": "anysearch", "tool": "get_sub_domains", "results": []}
 
-    async def fake_search(query, domain="", sub_domain="", max_results=5):
-        calls.append(("search", query, domain, sub_domain, max_results))
+    async def fake_search(query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+        calls.append(("search", query, domain, sub_domain, max_results, sub_domain_params))
         return {"ok": True, "provider": "anysearch", "tool": "search", "query": query, "results": []}
 
     async def fake_extract(url, max_length=20000):
@@ -2323,8 +2323,21 @@ def test_anysearch_commands_use_service_wrappers(monkeypatch, capsys):
     monkeypatch.setattr(cli.service, "anysearch_batch", fake_batch)
 
     assert cli.main(["anysearch-domains", "security"]) == cli.EXIT_OK
-    assert json.loads(capsys.readouterr().out)["tool"] == "list_domains"
-    assert cli.main(["as", "CVE-2024-3094", "--domain", "security.cve", "--sub-domain", "xz", "--max-results", "2"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["tool"] == "get_sub_domains"
+    assert cli.main(
+        [
+            "as",
+            "CVE-2024-3094",
+            "--domain",
+            "security",
+            "--sub-domain",
+            "vuln",
+            "--sub-domain-params",
+            '{"product":"xz"}',
+            "--max-results",
+            "2",
+        ]
+    ) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out)["query"] == "CVE-2024-3094"
     assert cli.main(["as-extract", "https://example.com", "--max-length", "123"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out)["url"] == "https://example.com"
@@ -2333,10 +2346,30 @@ def test_anysearch_commands_use_service_wrappers(monkeypatch, capsys):
 
     assert calls == [
         ("domains", "security"),
-        ("search", "CVE-2024-3094", "security.cve", "xz", 2),
+        ("search", "CVE-2024-3094", "security", "vuln", 2, '{"product":"xz"}'),
         ("extract", "https://example.com", 123),
         ("batch", ["a", "b"], 1),
     ]
+
+
+def test_anysearch_domains_missing_parent_returns_structured_parameter_error(monkeypatch, capsys):
+    async def fake_domains(domain=""):
+        assert domain == ""
+        return {
+            "ok": False,
+            "provider": "anysearch",
+            "operation": "discover_domains",
+            "tool": "get_sub_domains",
+            "error_type": "parameter_error",
+            "error": "parent domain required",
+        }
+
+    monkeypatch.setattr(cli.service, "anysearch_domains", fake_domains)
+
+    assert cli.main(["anysearch-domains"]) == cli.EXIT_PARAMETER_ERROR
+    data = json.loads(capsys.readouterr().out)
+    assert data["operation"] == "discover_domains"
+    assert data["error_type"] == "parameter_error"
 
 
 def test_zhipu_mcp_commands_use_service_wrappers(monkeypatch, capsys):
@@ -2402,7 +2435,7 @@ def test_provider_and_smoke_aliases_use_canonical_commands(monkeypatch, capsys):
         return {"ok": True, "provider": "context7-docs"}
 
     async def fake_anysearch_domains(*args, **kwargs):
-        return {"ok": True, "provider": "anysearch", "tool": "list_domains"}
+        return {"ok": True, "provider": "anysearch", "tool": "get_sub_domains"}
 
     async def fake_anysearch_search(*args, **kwargs):
         return {"ok": True, "provider": "anysearch", "tool": "search"}
@@ -2434,8 +2467,8 @@ def test_provider_and_smoke_aliases_use_canonical_commands(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["provider"] == "exa"
     assert cli.main(["z", "query"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out)["provider"] == "zhipu"
-    assert cli.main(["as-domains"]) == cli.EXIT_OK
-    assert json.loads(capsys.readouterr().out)["tool"] == "list_domains"
+    assert cli.main(["as-domains", "security"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["tool"] == "get_sub_domains"
     assert cli.main(["as-search", "query"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out)["tool"] == "search"
     assert cli.main(["as-extract", "https://example.com"]) == cli.EXIT_OK

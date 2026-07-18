@@ -479,6 +479,11 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
         "vertical_search",
         "not part of the `web_search` fallback",
         "not required by the `standard` minimum profile",
+        "get_sub_domains",
+        "sub_domain_params",
+        "Batch Discovery",
+        "AnySearch Extraction",
+        "schema_validation",
     ]
     for marker in required_markers:
         assert marker in readme
@@ -497,6 +502,11 @@ def test_streaming_and_anysearch_contract_public_and_packaged_assets_match():
         "vertical_search",
         "不进入 `web_search` 兜底链",
         "不是 `standard` 最低配置要求",
+        "get_sub_domains",
+        "sub_domain_params",
+        "Batch Discovery",
+        "AnySearch Extraction",
+        "schema_validation",
     ]
     for marker in zh_required_markers:
         assert marker in readme_zh

@@ -32,8 +32,8 @@
 - `smart-search zhipu-mcp-search-doc REPO QUERY [--max-results N] [--format json|markdown|content] [--output PATH]`
 - `smart-search zhipu-mcp-repo-structure REPO [--ref REF] [--format json|markdown|content] [--output PATH]`
 - `smart-search zhipu-mcp-read-file REPO PATH [--ref REF] [--format json|markdown|content] [--output PATH]`
-- `smart-search anysearch-domains [DOMAIN] [--format json|markdown|content] [--output PATH]`
-- `smart-search anysearch-search QUERY [--domain DOMAIN] [--sub-domain SUB_DOMAIN] [--max-results N] [--format json|markdown|content] [--output PATH]`
+- `smart-search anysearch-domains DOMAIN [--format json|markdown|content] [--output PATH]`
+- `smart-search anysearch-search QUERY [--domain DOMAIN --sub-domain SUB_DOMAIN [--sub-domain-params JSON_OBJECT]] [--max-results N] [--format json|markdown|content] [--output PATH]`
 - `smart-search anysearch-extract URL [--max-length N] [--format json|markdown|content] [--output PATH]`
 - `smart-search anysearch-batch QUERY... [--max-results N] [--format json|markdown|content] [--output PATH]`
 - `smart-search context7-library NAME [QUERY] [--format json|markdown|content] [--output PATH]`
@@ -73,6 +73,7 @@ Nested aliases: `config path`/`cfg p`, `config list`/`cfg ls`/`cfg l`, `config s
 - Zhipu search output includes `ok`, `query`, `provider`, `search_engine`, `results`, `total`, and `elapsed_ms`.
 - Zhipu MCP command output includes `ok`, `provider`, `tool`, `elapsed_ms`, and either `content` for reader/file-like tools or `results` plus `total` for search-like tools.
 - Context7 library output includes `ok`, `query`, `provider`, `results`, `total`, and `elapsed_ms`; Context7 docs output also includes `library_id`, `content`, and result metadata.
+- AnySearch output keeps local `operation` separate from the real upstream `tool` and includes `provider`, `capability`, `experimental`, `elapsed`, `content`, `raw_content`, `results`, `error`, `error_type`, and `schema_validation`. Domain search observability exposes only `domain`, `sub_domain`, `max_results`, and `sub_domain_param_keys`, never parameter values.
 - Map output includes `ok`, `base_url`, `results`, `response_time`, `url`, and `elapsed_ms`.
 - Deep planner output includes `ok`, `mode`, `query_mode`, `question`, `trigger_source`, `difficulty`, `intent_signals`, `decomposition`, `capability_plan`, `evidence_policy`, `preflight`, `steps`, `gap_check`, `final_answer_policy`, `usage_boundary`, `allowed_tools`, `evidence_dir`, and `elapsed_ms`.
 - Research executor output includes `ok`, `mode=deep_research_execution`, `query_mode=research`, `question`, `budget`, `research_plan`, `routing_decision`, `stage_results`, `discovery_sources`, `final_answer`, `content`, `citations`, `evidence_items`, `gap_check`, `provider_attempts`, `providers_used`, `fallback_used`, `degraded`, `route_policy_version`, `evidence_dir`, `minimum_profile_ok`, `capability_status`, and `elapsed_ms`.

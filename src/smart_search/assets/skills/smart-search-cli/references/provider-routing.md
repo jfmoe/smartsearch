@@ -65,7 +65,7 @@ Intent router rules:
 - `exa-search` and `exa-similar` use Exa only.
 - `context7-library` and `context7-docs` use Context7 only.
 - Context7 is Remote MCP-only. In ordinary `search`, an item with `provider=context7` and `url=context7:/...` is a `resolve-library-id` library candidate, even when exposed through `extra_sources` or merged `sources`; it is not fetchable or citable evidence, and `docs_search=ok` means resolution only. For a relevant docs/API claim, take the first candidate, strip `context7:` to obtain the library ID, and run `context7-docs`; otherwise ignore it. Do not follow library redirects automatically. Explicit Context7 commands report classified errors directly; automatic `docs_search` may fall back only to Exa, whose candidates require `fetch` before becoming evidence.
-- `anysearch-domains`, `anysearch-search`, `anysearch-extract`, and `anysearch-batch` use AnySearch only. Treat results as acceptance evidence until the target vertical domain is reviewed.
+- `anysearch-domains`, `anysearch-search`, `anysearch-extract`, and `anysearch-batch` form the explicit AnySearch Acceptance Surface. Only domain-less Vertical Discovery participates in the `vertical_search` Capability Seam. Domain Discovery, Batch Discovery, and AnySearch Extraction remain provider acceptance operations; extraction is not Web Fetch. Treat results as acceptance evidence until the target vertical domain is reviewed.
 - `zhipu-search` uses Zhipu only.
 - `zhipu-mcp-search`, `zhipu-mcp-reader`, and `zhipu-mcp-*` zread commands use Zhipu Coding Plan Remote MCP only.
 - Runtime config priority is environment variables first, then local config file, then defaults.
@@ -100,14 +100,16 @@ Jina Reader:
 
 AnySearch:
 
-- AnySearch uses JSON-RPC 2.0 `tools/call` at `ANYSEARCH_API_URL`, default `https://api.anysearch.com/mcp`.
+- AnySearch uses JSON-RPC 2.0 `tools/call` at `ANYSEARCH_API_URL`, default `https://api.anysearch.com/mcp`. `anysearch-domains DOMAIN` calls only `get_sub_domains`; never probe `tools/list`, guess aliases, or fall back to `list_domains`.
 - `ANYSEARCH_API_KEY` is optional. If configured, requests include `Authorization: Bearer ...`; if missing, anonymous requests are allowed.
 - `ANYSEARCH_TIMEOUT_SECONDS` defaults to `30`.
 - HTTP 200 responses with `result.isError=true` must return `ok=false`, `error_type=provider_error`, and no successful source results.
 - Markdown URL/title/snippet candidates should be parsed into `results`, while raw text remains in `content` and `raw_content`.
 - Structured results without URLs must be preserved as raw/structured evidence, not dropped.
-- Dotted vertical domain shorthand such as `security.cve` must be normalized to `domain=security` plus `sub_domain=cve` before calling AnySearch.
+- Domain-less `anysearch-search` is Vertical Discovery. Explicit domain search requires separate `--domain` and `--sub-domain` values. Dotted shorthand such as `security.cve`, legacy aliases, and incomplete pairs fail locally with migration guidance; there is no compatibility period and search never performs implicit discovery.
+- `--sub-domain-params` accepts one JSON object, nests it unchanged as upstream `sub_domain_params`, and rejects invalid/non-object JSON or reserved keys `query`, `domain`, `sub_domain`, and `max_results` before network access. Output exposes only sorted parameter keys, never values. Validate required/type/enum only from a reliable, versioned Verified Domain Contract; live discovery schemas remain acceptance evidence. Otherwise report `schema_validation.status=unavailable` and pass the request upstream unchanged.
 - `anysearch-batch` accepts at most 5 CLI query strings and returns `error_type=parameter_error` without sending a request when the limit is exceeded.
+- Stable AnySearch output separates local `operation` from upstream `tool`: `discover_domains`/`get_sub_domains`, `vertical_discovery` or `vertical_search`/`search`, `batch_discovery`/`batch_search`, and `anysearch_extraction`/`extract`. JSON-RPC invalid params map to `parameter_error`; MCP `result.isError` maps to `provider_error`; auth, rate limit, timeout, network, parse, and runtime failures remain distinct and errors are truncated/redacted.
 
 OpenAI-compatible streaming:
 

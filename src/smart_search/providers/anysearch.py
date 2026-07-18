@@ -8,22 +8,41 @@ import httpx
 from .base import BaseSearchProvider
 
 
-def _error_payload(exc: Exception) -> dict[str, str]:
-    if isinstance(exc, httpx.HTTPStatusError):
-        status_code = exc.response.status_code
-        if status_code in {401, 403}:
-            error_type = "auth_error"
-        elif status_code == 429:
-            error_type = "rate_limited"
-        else:
-            error_type = "network_error"
-        body = (exc.response.text or exc.response.reason_phrase or "")[:300]
-        return {"error_type": error_type, "error": f"HTTP {status_code}: {body}"}
-    if isinstance(exc, httpx.TimeoutException):
-        return {"error_type": "timeout", "error": "request timed out"}
-    if isinstance(exc, httpx.RequestError):
-        return {"error_type": "network_error", "error": str(exc)}
-    return {"error_type": "runtime_error", "error": str(exc)}
+_RESERVED_SUB_DOMAIN_FIELDS = {"query", "domain", "sub_domain", "max_results"}
+_LEGACY_SUB_DOMAIN_ALIASES = {("security", "cve"): ("security", "vuln")}
+
+
+def _elapsed(start: float) -> float:
+    return round((time.monotonic() - start) * 1000, 2)
+
+
+def _safe_error(message: Any, secrets: list[Any]) -> str:
+    text = str(message or "")
+    for secret in secrets:
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, "[redacted]")
+        elif isinstance(secret, (int, float)):
+            text = text.replace(str(secret), "[redacted]")
+    text = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [redacted]", text)
+    text = re.sub(r"(?i)(api[_-]?key|authorization)(\s*[:=]\s*)[^\s,;]+", r"\1\2[redacted]", text)
+    return text[:300]
+
+
+def _argument_secrets(arguments: dict[str, Any], api_key: str) -> list[Any]:
+    secrets: list[Any] = [api_key]
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+        elif isinstance(value, (str, int, float)) and value != "":
+            secrets.append(value)
+
+    collect(arguments)
+    return secrets
 
 
 def _extract_text(result: dict[str, Any]) -> str:
@@ -56,8 +75,7 @@ def _parse_markdown_results(text: str) -> list[dict[str, str]]:
             current["url"] = url_match.group(1).strip()
             continue
         if line.strip() and not line.startswith("#") and not line.startswith("- **URL**"):
-            description = current.get("description", "")
-            current["description"] = (description + " " + line.strip()).strip()
+            current["description"] = (current["description"] + " " + line.strip()).strip()
     if current:
         results.append(current)
     if results:
@@ -66,15 +84,80 @@ def _parse_markdown_results(text: str) -> list[dict[str, str]]:
     return [{"title": url, "url": url, "description": ""} for url in dict.fromkeys(urls)]
 
 
-def _split_domain(domain: str, sub_domain: str = "") -> tuple[str, str]:
-    if sub_domain or "." not in domain:
-        return domain, sub_domain
-    parent, child = domain.split(".", 1)
-    return parent, child
+def _structured_discovery_payload(result: dict[str, Any], text: str) -> Any:
+    structured = result.get("structuredContent")
+    if structured is not None:
+        return structured
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
-def _batch_query_object(query: str, max_results: int) -> dict[str, Any]:
-    return {"query": query, "max_results": max_results}
+def _discovery_items(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("sub_domains", "subDomains", "domains", "results", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            nested = _discovery_items(value)
+            if nested:
+                return nested
+    return []
+
+
+def _normalize_discovery(domain: str, result: dict[str, Any], text: str) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in _discovery_items(_structured_discovery_payload(result, text)):
+        sub_domain = item.get("sub_domain") or item.get("subDomain") or item.get("name") or item.get("id")
+        if not isinstance(sub_domain, str) or not sub_domain:
+            continue
+        schema = (
+            item.get("parameter_schema")
+            or item.get("parameterSchema")
+            or item.get("parameters")
+            or item.get("inputSchema")
+            or {}
+        )
+        if not isinstance(schema, dict):
+            schema = {}
+        entry = {
+            "domain": domain,
+            "sub_domain": sub_domain,
+            "description": item.get("description") if isinstance(item.get("description"), str) else "",
+            "parameter_schema": schema,
+        }
+        normalized.append(entry)
+    return normalized
+
+
+def _base_output(operation: str, tool: str, capability: str | None, elapsed: float = 0) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "provider": "anysearch",
+        "capability": capability,
+        "operation": operation,
+        "tool": tool,
+        "experimental": True,
+        "elapsed": elapsed,
+        "elapsed_ms": elapsed,
+        "content": "",
+        "raw_content": "",
+        "results": [],
+        "error": "",
+        "error_type": "",
+        "schema_validation": {"status": "not_applicable", "errors": []},
+    }
+
+
+def _parameter_error(operation: str, tool: str, capability: str | None, message: str) -> dict[str, Any]:
+    output = _base_output(operation, tool, capability)
+    output.update(error_type="parameter_error", error=message)
+    return output
 
 
 class AnySearchProvider(BaseSearchProvider):
@@ -85,12 +168,29 @@ class AnySearchProvider(BaseSearchProvider):
     def get_provider_name(self) -> str:
         return "AnySearch"
 
-    async def search(self, query: str, max_results: int = 5) -> str:
-        return await self.call_tool("search", {"query": query, "max_results": max_results})
+    async def search(self, query: str, max_results: int = 5) -> dict[str, Any]:
+        return await self.vertical_search(query, max_results=max_results)
 
-    async def list_domains(self, domain: str = "") -> str:
-        arguments = {"domain": domain} if domain else {}
-        return await self.call_tool("list_domains", arguments)
+    async def discover_domains(self, domain: str) -> dict[str, Any]:
+        if not domain:
+            return _parameter_error(
+                "discover_domains",
+                "get_sub_domains",
+                None,
+                "discover_domains requires a parent DOMAIN before contacting AnySearch",
+            )
+        if "." in domain:
+            return _parameter_error(
+                "discover_domains",
+                "get_sub_domains",
+                None,
+                "DOMAIN must be a parent domain; pass `anysearch-domains security`, not a dotted sub-domain",
+            )
+        output = await self.call_tool("discover_domains", "get_sub_domains", {"domain": domain}, None)
+        output["domain"] = domain
+        if output["ok"]:
+            output["results"] = _normalize_discovery(domain, output.get("raw_result") or {}, output["raw_content"])
+        return output
 
     async def vertical_search(
         self,
@@ -98,109 +198,218 @@ class AnySearchProvider(BaseSearchProvider):
         domain: str = "",
         sub_domain: str = "",
         max_results: int = 5,
-    ) -> str:
-        arguments: dict[str, Any] = {"query": query, "max_results": max_results}
-        domain, sub_domain = _split_domain(domain, sub_domain)
-        if domain:
-            arguments["domain"] = domain
-        if sub_domain:
-            arguments["sub_domain"] = sub_domain
-        return await self.call_tool("search", arguments)
-
-    async def extract(self, url: str, max_length: int = 20000) -> str:
-        return await self.call_tool("extract", {"url": url, "max_length": max_length})
-
-    async def batch_search(self, queries: list[str], max_results: int = 3) -> str:
-        if len(queries) > 5:
-            return json.dumps(
-                {
-                    "ok": False,
-                    "provider": "anysearch",
-                    "tool": "batch_search",
-                    "error_type": "parameter_error",
-                    "error": f"too many queries: {len(queries)} (max 5)",
-                    "elapsed_ms": 0,
-                },
-                ensure_ascii=False,
-                indent=2,
+        sub_domain_params: dict[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        explicit = bool(domain or sub_domain)
+        operation = "vertical_search" if explicit else "vertical_discovery"
+        if "." in domain or "." in sub_domain:
+            parent, _, child = domain.partition(".")
+            migration = f"--domain {parent} --sub-domain {child}" if child else "separate --domain and --sub-domain values"
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                f"dotted domain shorthand and legacy aliases are unsupported; migrate to `{migration}`",
             )
+        if bool(domain) != bool(sub_domain):
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                "explicit vertical search requires both --domain and --sub-domain; omit both for Vertical Discovery",
+            )
+        replacement = _LEGACY_SUB_DOMAIN_ALIASES.get((domain, sub_domain))
+        if replacement:
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                "legacy sub-domain aliases are unsupported; migrate to "
+                f"`--domain {replacement[0]} --sub-domain {replacement[1]}`",
+            )
+        if isinstance(sub_domain_params, str):
+            try:
+                sub_domain_params = json.loads(sub_domain_params)
+            except json.JSONDecodeError:
+                return _parameter_error(
+                    operation,
+                    "search",
+                    "vertical_search",
+                    "--sub-domain-params must be a valid JSON object",
+                )
+        if sub_domain_params is None:
+            sub_domain_params = {}
+        if not isinstance(sub_domain_params, dict):
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                "--sub-domain-params must be a single JSON object",
+            )
+        reserved = sorted(_RESERVED_SUB_DOMAIN_FIELDS.intersection(sub_domain_params))
+        if reserved:
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                "--sub-domain-params cannot override reserved fields: " + ", ".join(reserved),
+            )
+        if sub_domain_params and not explicit:
+            return _parameter_error(
+                operation,
+                "search",
+                "vertical_search",
+                "--sub-domain-params requires both --domain and --sub-domain",
+            )
+
+        arguments: dict[str, Any] = {"query": query, "max_results": max_results}
+        schema_validation = {"status": "not_applicable", "errors": []}
+        if explicit:
+            arguments.update(domain=domain, sub_domain=sub_domain, sub_domain_params=sub_domain_params)
+            schema_validation = {
+                "status": "unavailable",
+                "errors": [],
+                "message": "No Verified Domain Contract is available; parameters were passed to AnySearch unchanged.",
+            }
+
+        output = await self.call_tool(operation, "search", arguments, "vertical_search")
+        output["schema_validation"] = schema_validation
+        output["max_results"] = max_results
+        if explicit:
+            output.update(domain=domain, sub_domain=sub_domain)
+            output["sub_domain_param_keys"] = sorted(sub_domain_params)
+        return output
+
+    async def extract(self, url: str, max_length: int = 20000) -> dict[str, Any]:
         return await self.call_tool(
-            "batch_search",
-            {"queries": [_batch_query_object(query, max_results) for query in queries]},
+            "anysearch_extraction",
+            "extract",
+            {"url": url, "max_length": max_length},
+            None,
         )
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        start = time.time()
+    async def batch_search(self, queries: list[str], max_results: int = 3) -> dict[str, Any]:
+        if len(queries) > 5:
+            return _parameter_error(
+                "batch_discovery",
+                "batch_search",
+                None,
+                f"Batch Discovery accepts max 5 queries (received {len(queries)})",
+            )
+        return await self.call_tool(
+            "batch_discovery",
+            "batch_search",
+            {"queries": [{"query": query, "max_results": max_results} for query in queries]},
+            None,
+        )
+
+    async def call_tool(
+        self,
+        operation: str,
+        tool: str,
+        arguments: dict[str, Any],
+        capability: str | None,
+    ) -> dict[str, Any]:
+        start = time.monotonic()
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
+            "params": {"name": tool, "arguments": arguments},
         }
         headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        secrets = _argument_secrets(arguments, self.api_key)
 
         try:
             timeout = httpx.Timeout(connect=6.0, read=self.timeout, write=10.0, pool=None)
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                 response = await client.post(self.api_url, headers=headers, json=payload)
                 response.raise_for_status()
-                data = response.json()
-            output = self._normalize_response(name, arguments, data, start)
-        except Exception as e:
-            error = _error_payload(e)
-            output = {
-                "ok": False,
-                "provider": "anysearch",
-                "tool": name,
-                "error_type": error["error_type"],
-                "error": error["error"],
-                "elapsed_ms": round((time.time() - start) * 1000, 2),
-            }
-        return json.dumps(output, ensure_ascii=False, indent=2)
+                try:
+                    data = response.json()
+                except (json.JSONDecodeError, ValueError) as exc:
+                    output = _base_output(operation, tool, capability, _elapsed(start))
+                    output.update(error_type="parse_error", error=_safe_error(exc, secrets) or "Invalid JSON response")
+                    return output
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {401, 403}:
+                error_type = "auth_error"
+            elif status_code == 429:
+                error_type = "rate_limited"
+            else:
+                error_type = "network_error"
+            body = exc.response.text or exc.response.reason_phrase or ""
+            output = _base_output(operation, tool, capability, _elapsed(start))
+            output.update(error_type=error_type, error=_safe_error(f"HTTP {status_code}: {body}", secrets))
+            return output
+        except httpx.TimeoutException:
+            output = _base_output(operation, tool, capability, _elapsed(start))
+            output.update(error_type="timeout", error="request timed out")
+            return output
+        except httpx.RequestError as exc:
+            output = _base_output(operation, tool, capability, _elapsed(start))
+            output.update(error_type="network_error", error=_safe_error(exc, secrets))
+            return output
+        except Exception as exc:
+            output = _base_output(operation, tool, capability, _elapsed(start))
+            output.update(error_type="runtime_error", error=_safe_error(exc, secrets))
+            return output
+        return self._normalize_response(operation, tool, arguments, capability, data, start)
 
-    def _normalize_response(self, name: str, arguments: dict[str, Any], data: dict[str, Any], start: float) -> dict[str, Any]:
+    def _normalize_response(
+        self,
+        operation: str,
+        tool: str,
+        arguments: dict[str, Any],
+        capability: str | None,
+        data: Any,
+        start: float,
+    ) -> dict[str, Any]:
+        output = _base_output(operation, tool, capability, _elapsed(start))
+        secrets = _argument_secrets(arguments, self.api_key)
+        if not isinstance(data, dict):
+            output.update(error_type="parse_error", error="AnySearch JSON-RPC response must be an object")
+            return output
         if "error" in data:
             error = data.get("error") or {}
-            message = error.get("message") if isinstance(error, dict) else str(error)
-            return {
-                "ok": False,
-                "provider": "anysearch",
-                "tool": name,
-                "error_type": "provider_error",
-                "error": message or "AnySearch JSON-RPC error",
-                "elapsed_ms": round((time.time() - start) * 1000, 2),
-            }
+            code = error.get("code") if isinstance(error, dict) else None
+            message = error.get("message") if isinstance(error, dict) else error
+            output.update(
+                error_type="parameter_error" if code == -32602 else "provider_error",
+                error=_safe_error(message or "AnySearch JSON-RPC error", secrets),
+            )
+            return output
 
-        result = data.get("result") or {}
+        result = data.get("result")
+        if not isinstance(result, dict):
+            output.update(error_type="parse_error", error="AnySearch JSON-RPC result must be an object")
+            return output
         text = _extract_text(result)
-        is_error = bool(result.get("isError"))
-        parsed_results = [] if is_error else _parse_markdown_results(text)
-        if text and not is_error and not parsed_results:
+        output.update(content=text, raw_content=text, raw_result=result)
+        if result.get("isError"):
+            safe_message = _safe_error(text or "AnySearch tool returned isError=true", secrets)
+            output.pop("raw_result", None)
+            output.update(
+                content=safe_message,
+                raw_content=safe_message,
+                error_type="provider_error",
+                error=safe_message,
+            )
+            return output
+
+        parsed_results = _parse_markdown_results(text)
+        if text and not parsed_results and operation != "discover_domains":
             parsed_results = [
                 {
-                    "title": f"{name} structured evidence",
+                    "title": f"{operation} structured result",
                     "url": "",
                     "description": text[:500],
                     "evidence_type": "structured",
                     "raw_content": text,
                 }
             ]
-        output: dict[str, Any] = {
-            "ok": not is_error,
-            "provider": "anysearch",
-            "tool": name,
-            "content": text,
-            "raw_content": text,
-            "results": parsed_results,
-            "total": len(parsed_results),
-            "elapsed_ms": round((time.time() - start) * 1000, 2),
-        }
-        for key in ("query", "domain", "sub_domain", "url"):
-            if arguments.get(key):
-                output[key] = arguments[key]
-        if is_error:
-            output["error_type"] = "provider_error"
-            output["error"] = text or "AnySearch tool returned isError=true"
+        output.update(ok=True, results=parsed_results, total=len(parsed_results))
         return output

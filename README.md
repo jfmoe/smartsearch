@@ -160,7 +160,8 @@ If no structured preference exists, the first ordinary command initializes only 
 | `docs_search` | `context7-library`, `context7-docs`, `exa-search` | Context7, Exa | Official docs, SDKs, APIs, framework/library evidence |
 | `web_search` | `zhipu-search`, `zhipu-mcp-search`, intent-routed reinforcement inside `search` | Zhipu Web Search API, Zhipu Coding Plan MCP, Tavily, Firecrawl | Chinese, domestic, current, domain-filtered, or supplementary web discovery |
 | `web_fetch` | `fetch`, `zhipu-mcp-reader` | Tavily, Jina Reader, Zhipu Coding Plan MCP Reader, Firecrawl | Exact URL content extraction for evidence |
-| `vertical_search` | `anysearch-domains`, `anysearch-search`, `anysearch-extract`, `anysearch-batch` | AnySearch (experimental) | Acceptance testing for structured vertical domains such as CVE, finance, legal, academic, and code/docs |
+| `vertical_search` | intent-routed domain-less `anysearch-search` | AnySearch (experimental) | Vertical Discovery for explicit vertical intent; never a Web Search fallback |
+| AnySearch Acceptance Surface | `anysearch-domains`, `anysearch-search`, `anysearch-extract`, `anysearch-batch` | AnySearch (experimental) | Explicit Domain Discovery, Vertical Discovery/domain search, Batch Discovery, and AnySearch Extraction acceptance |
 | `site_map` | `map` | Tavily | Site/documentation structure discovery |
 | `deep_planner` | `deep` / `dr` | Local planner only | Offline plan generation; no provider call by default |
 | `research_executor` | `research` / `rs` | Registered providers by capability | Live staged research: plan, discover, fetch/read, gap check, evidence-only synthesis |
@@ -174,7 +175,7 @@ Fallback is same-capability only:
 | `web_search` | Zhipu Web Search API -> Zhipu Coding Plan MCP `web_search_prime` -> Tavily -> Firecrawl |
 | `web_fetch` | Tavily -> Jina Reader with `JINA_API_KEY` -> Zhipu Coding Plan MCP `webReader` -> Firecrawl |
 
-AnySearch is intentionally not part of the `web_search` fallback chain and is not required by the `standard` minimum profile. Use its explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
+AnySearch is intentionally not part of the `web_search` fallback chain and is not required by the `standard` minimum profile. Only domain-less Vertical Discovery belongs to the `vertical_search` Capability Seam. Domain Discovery, Batch Discovery, and AnySearch Extraction remain provider acceptance operations; extraction is not Web Fetch. Use the explicit commands for acceptance and boundary testing before promoting any vertical domain into a future route.
 
 Jina Reader is a `web_fetch` provider only. `JINA_API_KEY` is required before Jina satisfies `SMART_SEARCH_MINIMUM_PROFILE=standard`; anonymous `r.jina.ai` behavior is treated as explicit/experimental fetch behavior and must not weaken fail-closed setup checks.
 
@@ -313,7 +314,7 @@ Important boundaries:
 - `ZHIPU_SEARCH_ENGINE` defaults to `search_std`. Supported official values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`; custom values remain allowed for future services.
 - `TAVILY_API_URL` affects Tavily only. It does not proxy Zhipu. For Tavily Hikari / pooled endpoints, use `https://<host>/api/tavily`; setup normalizes root-host or `/mcp` inputs to that REST base.
 - `FIRECRAWL_API_URL` defaults to `https://api.firecrawl.dev/v2`.
-- AnySearch uses JSON-RPC 2.0 `tools/call` at `https://api.anysearch.com/mcp` by default. It allows anonymous calls when no key is configured, but authenticated calls send `Authorization: Bearer ...`. HTTP 200 responses with `result.isError=true` are treated as provider errors, not as successful evidence.
+- AnySearch uses JSON-RPC 2.0 `tools/call` at `https://api.anysearch.com/mcp` by default. `anysearch-domains DOMAIN` calls only `get_sub_domains`; it never probes `tools/list`, guesses aliases, or falls back to `list_domains`. Explicit Acceptance Surface commands may try anonymous access when no key is configured; a key marks AnySearch configured for automatic Vertical Discovery. HTTP 200 responses with `result.isError=true` are provider errors, not successful evidence.
 - `doctor` and `route` report intent router status, embedding model, threshold, margin, their config source, timeout, and degradation behavior. They do not expose router API keys.
 
 Non-interactive setup example:
@@ -361,12 +362,13 @@ Experimental AnySearch configuration is optional and does not satisfy or change 
 ```powershell
 smart-search setup --non-interactive --anysearch-api-url "https://api.anysearch.com/mcp" --anysearch-key "your-anysearch-key"
 smart-search anysearch-domains security --format json
-smart-search anysearch-search "CVE-2024-3094" --domain security.cve --max-results 3 --format json
+smart-search anysearch-search "latest travel ideas" --max-results 3 --format json
+smart-search anysearch-search "CVE-2024-3094" --domain security --sub-domain vuln --sub-domain-params '{"product":"xz"}' --max-results 3 --format json
 smart-search anysearch-extract "https://example.com/source" --format json
 smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 ```
 
-For vertical domains, the dotted shorthand `security.cve` is accepted by the CLI and sent to AnySearch as `domain=security` plus `sub_domain=cve`. You can also pass the split form explicitly with `--domain security --sub-domain cve`.
+`anysearch-search` without a domain is explicit Vertical Discovery. Domain search requires separate `--domain` and `--sub-domain` values plus at most one JSON object in `--sub-domain-params`; the object is nested unchanged under the upstream `sub_domain_params` field and output exposes only its keys. Dotted shorthand such as `security.cve`, legacy sub-domain aliases, incomplete pairs, invalid/non-object JSON, and reserved-field overrides fail locally with migration guidance. Smart Search validates required/type/enum only from a reliable, versioned Verified Domain Contract; live discovery schemas remain acceptance evidence. Without such a contract, `schema_validation.status=unavailable` is stable and the request is sent upstream without implicit discovery.
 
 Local config path:
 
@@ -400,10 +402,10 @@ Provider timeouts:
 | `zhipu-mcp-search-doc` | `zmcp-doc` | Search open-source repository docs through zread MCP |
 | `zhipu-mcp-repo-structure` | `zmcp-tree` | Read repository structure through zread MCP |
 | `zhipu-mcp-read-file` | `zmcp-file` | Read one repository file through zread MCP |
-| `anysearch-domains` | `as-domains` | Experimental AnySearch domain discovery |
-| `anysearch-search` | `as-search`, `as` | Experimental AnySearch vertical/general search |
-| `anysearch-extract` | `as-extract` | Experimental AnySearch URL extraction |
-| `anysearch-batch` | `as-batch` | Experimental AnySearch batch search, up to 5 queries |
+| `anysearch-domains` | `as-domains` | Domain Discovery for a required parent domain via `get_sub_domains` |
+| `anysearch-search` | `as-search`, `as` | Vertical Discovery or explicit split domain/sub-domain search |
+| `anysearch-extract` | `as-extract` | Explicit AnySearch Extraction; not Web Fetch |
+| `anysearch-batch` | `as-batch` | Explicit Batch Discovery, up to 5 domain-less queries |
 | `context7-library` | `c7`, `ctx7` | Resolve Context7 library candidates |
 | `context7-docs` | `c7d`, `c7docs`, `ctx7-docs` | Fetch Context7 docs |
 | `route-calibrate` | `route-cal`, `rcal` | Evaluate embedding router models and recommend threshold/margin |
@@ -434,7 +436,7 @@ smart-search zhipu-search "today China AI news" --search-engine search_pro_sogou
 smart-search zhipu-mcp-search "today China AI news" --count 5 --format json
 smart-search zhipu-mcp-reader "https://example.com/source" --format json
 smart-search zhipu-mcp-search-doc "owner/repo" "install" --format json
-smart-search anysearch-search "CVE-2024-3094" --domain security.cve --max-results 3 --format json
+smart-search anysearch-search "CVE-2024-3094" --domain security --sub-domain vuln --sub-domain-params '{"product":"xz"}' --max-results 3 --format json
 smart-search anysearch-extract "https://example.com/source" --format json
 smart-search exa-similar "https://example.com/source" --num-results 5 --format json
 smart-search fetch "https://example.com/source" --format markdown --output page.md

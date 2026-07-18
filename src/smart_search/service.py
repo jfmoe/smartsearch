@@ -3012,34 +3012,40 @@ def _anysearch_provider() -> AnySearchProvider:
     return AnySearchProvider(config.anysearch_api_url, config.anysearch_api_key, config.anysearch_timeout)
 
 
-async def _decode_provider_json(raw: str, provider: str = "anysearch") -> dict[str, Any]:
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"ok": False, "provider": provider, "error_type": "parse_error", "error": raw}
-
-
 async def anysearch_domains(domain: str = "") -> dict[str, Any]:
-    return await _decode_provider_json(await _anysearch_provider().list_domains(domain))
+    return await _anysearch_provider().discover_domains(domain)
 
 
-async def anysearch_search(query: str, domain: str = "", sub_domain: str = "", max_results: int = 5) -> dict[str, Any]:
-    return await _decode_provider_json(
-        await _anysearch_provider().vertical_search(
-            query=query,
-            domain=domain,
-            sub_domain=sub_domain,
-            max_results=max_results,
-        )
+async def anysearch_search(
+    query: str,
+    domain: str = "",
+    sub_domain: str = "",
+    max_results: int = 5,
+    sub_domain_params: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
+    return await _anysearch_provider().vertical_search(
+        query=query,
+        domain=domain,
+        sub_domain=sub_domain,
+        max_results=max_results,
+        sub_domain_params=sub_domain_params,
     )
 
 
 async def anysearch_extract(url: str, max_length: int = 20000) -> dict[str, Any]:
-    return await _decode_provider_json(await _anysearch_provider().extract(url, max_length=max_length))
+    return await _anysearch_provider().extract(url, max_length=max_length)
 
 
 async def anysearch_batch(queries: list[str], max_results: int = 3) -> dict[str, Any]:
-    return await _decode_provider_json(await _anysearch_provider().batch_search(queries, max_results=max_results))
+    return await _anysearch_provider().batch_search(queries, max_results=max_results)
+
+
+async def _decode_provider_json(raw: str, provider: str) -> dict[str, Any]:
+    """Decode legacy provider boundaries that have not yet migrated to structured results."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {"ok": False, "provider": provider, "error_type": "parse_error", "error": raw}
 
 
 def _zhipu_mcp_search_provider() -> ZhipuMCPProvider:

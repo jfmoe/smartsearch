@@ -1758,28 +1758,28 @@ async def test_exa_search_preserves_provider_error_type(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anysearch_service_wrappers_decode_provider_json(monkeypatch):
+async def test_anysearch_service_wrappers_preserve_structured_provider_results(monkeypatch):
     calls = []
 
     class FakeAnySearchProvider:
         def __init__(self, api_url, api_key, timeout):
             calls.append(("init", api_url, api_key, timeout))
 
-        async def list_domains(self, domain=""):
+        async def discover_domains(self, domain):
             calls.append(("domains", domain))
-            return json.dumps({"ok": True, "provider": "anysearch", "tool": "list_domains", "domain": domain})
+            return {"ok": True, "provider": "anysearch", "operation": "discover_domains", "tool": "get_sub_domains", "domain": domain}
 
-        async def vertical_search(self, query, domain="", sub_domain="", max_results=5):
-            calls.append(("search", query, domain, sub_domain, max_results))
-            return json.dumps({"ok": True, "provider": "anysearch", "tool": "search", "query": query})
+        async def vertical_search(self, query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+            calls.append(("search", query, domain, sub_domain, max_results, sub_domain_params))
+            return {"ok": True, "provider": "anysearch", "operation": "vertical_search", "tool": "search"}
 
         async def extract(self, url, max_length=20000):
             calls.append(("extract", url, max_length))
-            return json.dumps({"ok": True, "provider": "anysearch", "tool": "extract", "url": url})
+            return {"ok": True, "provider": "anysearch", "operation": "anysearch_extraction", "tool": "extract", "url": url}
 
         async def batch_search(self, queries, max_results=3):
             calls.append(("batch", queries, max_results))
-            return json.dumps({"ok": True, "provider": "anysearch", "tool": "batch_search", "results": []})
+            return {"ok": True, "provider": "anysearch", "operation": "batch_discovery", "tool": "batch_search", "results": []}
 
     monkeypatch.setenv("ANYSEARCH_API_URL", "https://anysearch.example.com/mcp")
     monkeypatch.setenv("ANYSEARCH_API_KEY", "as-test-secret")
@@ -1787,19 +1787,25 @@ async def test_anysearch_service_wrappers_decode_provider_json(monkeypatch):
     monkeypatch.setattr(service, "AnySearchProvider", FakeAnySearchProvider)
 
     domains = await service.anysearch_domains("security")
-    search = await service.anysearch_search("CVE-2024-3094", domain="security.cve", sub_domain="xz", max_results=2)
+    search = await service.anysearch_search(
+        "CVE-2024-3094",
+        domain="security",
+        sub_domain="vuln",
+        max_results=2,
+        sub_domain_params='{"product":"xz"}',
+    )
     extract = await service.anysearch_extract("https://example.com", max_length=123)
     batch = await service.anysearch_batch(["a", "b"], max_results=1)
 
-    assert domains["tool"] == "list_domains"
-    assert search["query"] == "CVE-2024-3094"
+    assert domains["tool"] == "get_sub_domains"
+    assert search["operation"] == "vertical_search"
     assert extract["url"] == "https://example.com"
     assert batch["tool"] == "batch_search"
     assert calls == [
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
         ("domains", "security"),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
-        ("search", "CVE-2024-3094", "security.cve", "xz", 2),
+        ("search", "CVE-2024-3094", "security", "vuln", 2, '{"product":"xz"}'),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
         ("extract", "https://example.com", 123),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
@@ -1808,21 +1814,73 @@ async def test_anysearch_service_wrappers_decode_provider_json(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anysearch_service_parse_error(monkeypatch):
+async def test_anysearch_domains_preserves_provider_parameter_error(monkeypatch):
     class FakeAnySearchProvider:
         def __init__(self, api_url, api_key, timeout):
             pass
 
-        async def list_domains(self, domain=""):
-            return "not json"
+        async def discover_domains(self, domain):
+            assert domain == ""
+            return {
+                "ok": False,
+                "provider": "anysearch",
+                "operation": "discover_domains",
+                "tool": "get_sub_domains",
+                "error_type": "parameter_error",
+                "error": "parent domain required",
+            }
 
     monkeypatch.setattr(service, "AnySearchProvider", FakeAnySearchProvider)
 
     result = await service.anysearch_domains()
 
     assert result["ok"] is False
-    assert result["error_type"] == "parse_error"
+    assert result["operation"] == "discover_domains"
+    assert result["error_type"] == "parameter_error"
     assert result["provider"] == "anysearch"
+
+
+@pytest.mark.asyncio
+async def test_anysearch_service_observes_current_contract_at_mcp_transport(monkeypatch, tmp_path):
+    _reset_config(monkeypatch, tmp_path)
+    calls = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout, follow_redirects=True):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, headers, json):
+            calls.append(json)
+            return httpx.Response(
+                200,
+                json={"jsonrpc": "2.0", "id": 1, "result": {"content": []}},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr("smart_search.providers.anysearch.httpx.AsyncClient", FakeAsyncClient)
+
+    result = await service.anysearch_search(
+        "fundamentals",
+        domain="finance",
+        sub_domain="fundamental",
+        max_results=2,
+        sub_domain_params='{"ticker":"AAPL","period":"annual"}',
+    )
+
+    assert result["operation"] == "vertical_search"
+    assert result["tool"] == "search"
+    assert result["schema_validation"]["status"] == "unavailable"
+    assert result["sub_domain_param_keys"] == ["period", "ticker"]
+    assert calls[0]["params"]["arguments"]["sub_domain_params"] == {
+        "ticker": "AAPL",
+        "period": "annual",
+    }
 
 
 @pytest.mark.asyncio

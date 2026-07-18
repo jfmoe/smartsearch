@@ -2434,6 +2434,7 @@ async def _run_async(args: argparse.Namespace) -> int:
             domain=args.domain,
             sub_domain=args.sub_domain,
             max_results=args.max_results,
+            sub_domain_params=args.sub_domain_params,
         )
         return _print_result("anysearch-search", data, args.format, args.output)
     if args.command == "anysearch-extract":
@@ -2898,28 +2899,40 @@ def build_parser() -> argparse.ArgumentParser:
     anysearch_domains_parser = sub.add_parser(
         "anysearch-domains",
         aliases=COMMAND_ALIASES["anysearch-domains"],
-        help="List AnySearch vertical search domains.",
+        help="Discover AnySearch sub-domains for a required parent DOMAIN.",
     )
     anysearch_domains_parser.set_defaults(command="anysearch-domains")
-    anysearch_domains_parser.add_argument("domain", nargs="?", default="")
+    anysearch_domains_parser.add_argument(
+        "domain",
+        nargs="?",
+        default="",
+        metavar="DOMAIN",
+        help="Required parent domain, for example: security",
+    )
     _add_format_args(anysearch_domains_parser)
 
     anysearch_search_parser = sub.add_parser(
         "anysearch-search",
         aliases=COMMAND_ALIASES["anysearch-search"],
-        help="Run experimental AnySearch vertical/general search.",
+        help="Run AnySearch Vertical Discovery or an explicit domain/sub-domain search.",
     )
     anysearch_search_parser.set_defaults(command="anysearch-search")
     anysearch_search_parser.add_argument("query")
     anysearch_search_parser.add_argument("--domain", default="")
     anysearch_search_parser.add_argument("--sub-domain", default="")
+    anysearch_search_parser.add_argument(
+        "--sub-domain-params",
+        default="{}",
+        metavar="JSON_OBJECT",
+        help="One JSON object passed unchanged as sub_domain_params; values are never echoed.",
+    )
     anysearch_search_parser.add_argument("--max-results", type=int, default=5)
     _add_format_args(anysearch_search_parser)
 
     anysearch_extract_parser = sub.add_parser(
         "anysearch-extract",
         aliases=COMMAND_ALIASES["anysearch-extract"],
-        help="Extract a URL through AnySearch experimental extract.",
+        help="Run explicit experimental AnySearch Extraction for a URL (not Web Fetch).",
     )
     anysearch_extract_parser.set_defaults(command="anysearch-extract")
     anysearch_extract_parser.add_argument("url")
@@ -2929,7 +2942,7 @@ def build_parser() -> argparse.ArgumentParser:
     anysearch_batch_parser = sub.add_parser(
         "anysearch-batch",
         aliases=COMMAND_ALIASES["anysearch-batch"],
-        help="Run up to 5 AnySearch queries in parallel.",
+        help="Run explicit Batch Discovery for up to 5 domain-less AnySearch queries.",
     )
     anysearch_batch_parser.set_defaults(command="anysearch-batch")
     anysearch_batch_parser.add_argument("queries", nargs="+")

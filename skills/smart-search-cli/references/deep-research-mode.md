@@ -151,7 +151,7 @@ Prefer PowerShell-safe quoted commands in generated plans because Windows users 
 - `exa-search`: low-noise source discovery for official domains, papers, product pages, known domains, and trusted pages. Do not treat Exa as the universal second hop for every high-risk or verification task.
 - `exa-similar`: adjacent-source discovery when a known reliable URL is available.
 - `search --extra-sources N`: Tavily/Firecrawl horizontal candidate collection for breadth. Treat those candidates as discovery until fetched.
-- `anysearch-domains` and `anysearch-search`: experimental vertical search. Inspect domains first, then search a selected domain; do not insert it into the default fallback chain.
+- Domain-less `anysearch-search`: experimental Vertical Discovery for explicit vertical intent; do not insert it into the Web Search fallback chain. `anysearch-domains`, explicit domain search, `anysearch-batch`, and `anysearch-extract` are Acceptance Surface operations, not automatic research steps.
 - `fetch`: page-content evidence. Key claims require fetched page text under `fetch_before_claim`.
 - `map`: site structure exploration before many fetches from one site; not claim evidence by itself.
 
