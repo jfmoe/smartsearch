@@ -9,9 +9,9 @@ The manifest starts with an empty `verified_domains` collection. A future Verifi
 | Candidate | Versioned mock evidence | Result shape | Current conclusion | Missing gates |
 | --- | --- | --- | --- | --- |
 | `academic.search` | discovery schema, valid request, missing `keywords`, provider error | URL result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
-| `security.vuln` | discovery schema, valid request, missing `product`, provider error | URL-less structured result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
-| `finance.fundamental` | discovery schema, valid request, missing `ticker`, provider error | URL-less structured result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
-| `code.doc` | discovery schema, valid request, missing `repository`, provider error | URL result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
+| `security.vuln` | discovery schema, valid request with `type`/`value`, missing required params, provider error | URL-less structured result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
+| `finance.fundamental` | discovery schema, valid request with `cn_code`/`symbol`/`type`, missing required params, provider error | URL-less structured result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
+| `code.doc` | discovery schema, valid request with `library`, missing required param, provider error | URL result | discovered/unverified | sanitized live capture, complete independent live run, upstream stability window |
 
 The fixtures under `tests/fixtures/anysearch/` are sanitized synthetic transport fixtures, not live acceptance evidence. Their schema fingerprints are checked against the manifest in ordinary offline CI. `security.cve` is intentionally absent and rejected locally without a compatibility mapping; the candidate is `security.vuln`.
 

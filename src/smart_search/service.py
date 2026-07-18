@@ -1550,17 +1550,17 @@ ANYSEARCH_LIVE_DOMAIN_CASES = {
     "security.vuln": {
         "domain": "security",
         "sub_domain": "vuln",
-        "params": {"product": "xz", "severity": "critical"},
+        "params": {"type": "cve", "value": "CVE-2024-3094"},
     },
     "finance.fundamental": {
         "domain": "finance",
         "sub_domain": "fundamental",
-        "params": {"ticker": "AAPL", "period": "annual"},
+        "params": {"cn_code": "US", "symbol": "AAPL", "type": "stock"},
     },
     "code.doc": {
         "domain": "code",
         "sub_domain": "doc",
-        "params": {"repository": "openai/openai-python", "language": "python"},
+        "params": {"library": "openai/openai-python"},
     },
 }
 

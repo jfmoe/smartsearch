@@ -36,7 +36,7 @@ smart-search context7-docs "/facebook/react" "useEffect cleanup" --format json
 smart-search zhipu-search "today China AI news" --count 5 --format json
 smart-search anysearch-domains security --format json
 smart-search anysearch-search "travel ideas" --max-results 3 --format json
-smart-search anysearch-search "CVE-2024-3094" --domain security --sub-domain vuln --sub-domain-params '{"product":"xz"}' --max-results 3 --format json
+smart-search anysearch-search "CVE-2024-3094" --domain security --sub-domain vuln --sub-domain-params '{"type":"cve","value":"CVE-2024-3094"}' --max-results 3 --format json
 smart-search anysearch-extract "https://example.com/source" --format json
 smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 smart-search fetch "https://example.com" --format markdown --output page.md

@@ -1,21 +1,21 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "provenance": "synthetic_mock",
   "domain": "security",
   "sub_domain": "vuln",
   "parameter_schema": {
     "type": "object",
-    "required": ["product"],
+    "required": ["type", "value"],
     "properties": {
-      "product": {"type": "string"},
-      "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"]}
+      "type": {"type": "string"},
+      "value": {"type": "string"}
     }
   },
-  "valid_params": {"product": "xz", "severity": "critical"},
+  "valid_params": {"type": "cve", "value": "CVE-2024-3094"},
   "valid_result": {
     "structuredContent": {"identifier": "CVE-2024-3094", "severity": "critical", "affected": "xz utils"},
     "content": [{"type": "text", "text": "CVE-2024-3094 severity: critical\nAffected: xz utils"}]
   },
-  "missing_required_error": {"code": -32602, "message": "product is required"},
+  "missing_required_error": {"code": -32602, "message": "type and value are required"},
   "provider_error": {"isError": true, "content": [{"type": "text", "text": "security provider unavailable"}]}
 }

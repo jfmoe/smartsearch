@@ -1,20 +1,19 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "provenance": "synthetic_mock",
   "domain": "code",
   "sub_domain": "doc",
   "parameter_schema": {
     "type": "object",
-    "required": ["repository"],
+    "required": ["library"],
     "properties": {
-      "repository": {"type": "string"},
-      "language": {"type": "string"}
+      "library": {"type": "string"}
     }
   },
-  "valid_params": {"repository": "openai/openai-python", "language": "python"},
+  "valid_params": {"library": "openai/openai-python"},
   "valid_result": {
     "content": [{"type": "text", "text": "### 1. Responses API\n- **URL**: https://github.com/openai/openai-python/blob/main/README.md\nPython SDK documentation."}]
   },
-  "missing_required_error": {"code": -32602, "message": "repository is required"},
+  "missing_required_error": {"code": -32602, "message": "library is required"},
   "provider_error": {"isError": true, "content": [{"type": "text", "text": "code documentation provider unavailable"}]}
 }

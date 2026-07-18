@@ -1267,7 +1267,7 @@ async def test_anysearch_live_operation_smoke_reports_each_operation_and_domain(
     assert explicit_calls[0][2:4] == ("academic", "search")
     assert explicit_calls[0][5] == {"keywords": "retrieval augmented generation", "year_from": 2024}
     assert explicit_calls[1][2:4] == ("security", "vuln")
-    assert explicit_calls[1][5] == {"product": "xz", "severity": "critical"}
+    assert explicit_calls[1][5] == {"type": "cve", "value": "CVE-2024-3094"}
 
 
 @pytest.mark.asyncio
@@ -1275,6 +1275,7 @@ async def test_anysearch_live_operation_smoke_all_tracks_manifest_candidates(mon
     monkeypatch.setenv("ANYSEARCH_API_KEY", "explicit-environment-key")
     monkeypatch.setenv("ANYSEARCH_LIVE_ACCEPTANCE", "all")
     seen_domains = []
+    seen_params = {}
 
     class FakeAnySearchProvider:
         def __init__(self, api_url, api_key, timeout):
@@ -1285,7 +1286,9 @@ async def test_anysearch_live_operation_smoke_all_tracks_manifest_candidates(mon
 
         async def vertical_search(self, query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
             if domain:
-                seen_domains.append(f"{domain}.{sub_domain}")
+                candidate = f"{domain}.{sub_domain}"
+                seen_domains.append(candidate)
+                seen_params[candidate] = sub_domain_params
             return {"ok": True}
 
         async def batch_search(self, queries, max_results=3):
@@ -1302,6 +1305,12 @@ async def test_anysearch_live_operation_smoke_all_tracks_manifest_candidates(mon
         item["id"] for item in service.get_verified_domain_manifest()["candidate_assessments"]
     ]
     assert seen_domains == manifest_candidates
+    assert seen_params == {
+        "academic.search": {"keywords": "retrieval augmented generation", "year_from": 2024},
+        "security.vuln": {"type": "cve", "value": "CVE-2024-3094"},
+        "finance.fundamental": {"cn_code": "US", "symbol": "AAPL", "type": "stock"},
+        "code.doc": {"library": "openai/openai-python"},
+    }
     assert [item["domain"] for item in result["domain_results"]] == manifest_candidates
 
 
@@ -1943,7 +1952,7 @@ async def test_anysearch_service_wrappers_preserve_structured_provider_results(m
         domain="security",
         sub_domain="vuln",
         max_results=2,
-        sub_domain_params='{"product":"xz"}',
+        sub_domain_params='{"type":"cve","value":"CVE-2024-3094"}',
     )
     extract = await service.anysearch_extract("https://example.com", max_length=123)
     batch = await service.anysearch_batch(["a", "b"], max_results=1)
@@ -1956,7 +1965,14 @@ async def test_anysearch_service_wrappers_preserve_structured_provider_results(m
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
         ("domains", "security"),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
-        ("search", "CVE-2024-3094", "security", "vuln", 2, '{"product":"xz"}'),
+        (
+            "search",
+            "CVE-2024-3094",
+            "security",
+            "vuln",
+            2,
+            '{"type":"cve","value":"CVE-2024-3094"}',
+        ),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
         ("extract", "https://example.com", 123),
         ("init", "https://anysearch.example.com/mcp", "as-test-secret", 7.0),
@@ -2256,16 +2272,17 @@ async def test_anysearch_service_observes_current_contract_at_mcp_transport(monk
         domain="finance",
         sub_domain="fundamental",
         max_results=2,
-        sub_domain_params='{"ticker":"AAPL","period":"annual"}',
+        sub_domain_params='{"cn_code":"US","symbol":"AAPL","type":"stock"}',
     )
 
     assert result["operation"] == "vertical_search"
     assert result["tool"] == "search"
     assert result["schema_validation"]["status"] == "unavailable"
-    assert result["sub_domain_param_keys"] == ["period", "ticker"]
+    assert result["sub_domain_param_keys"] == ["cn_code", "symbol", "type"]
     assert calls[0]["params"]["arguments"]["sub_domain_params"] == {
-        "ticker": "AAPL",
-        "period": "annual",
+        "cn_code": "US",
+        "symbol": "AAPL",
+        "type": "stock",
     }
 
 

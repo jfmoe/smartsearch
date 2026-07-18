@@ -2362,7 +2362,7 @@ def test_anysearch_commands_use_service_wrappers(monkeypatch, capsys):
             "--sub-domain",
             "vuln",
             "--sub-domain-params",
-            '{"product":"xz"}',
+            '{"type":"cve","value":"CVE-2024-3094"}',
             "--max-results",
             "2",
         ]
@@ -2375,7 +2375,14 @@ def test_anysearch_commands_use_service_wrappers(monkeypatch, capsys):
 
     assert calls == [
         ("domains", "security"),
-        ("search", "CVE-2024-3094", "security", "vuln", 2, '{"product":"xz"}'),
+        (
+            "search",
+            "CVE-2024-3094",
+            "security",
+            "vuln",
+            2,
+            '{"type":"cve","value":"CVE-2024-3094"}',
+        ),
         ("extract", "https://example.com", 123),
         ("batch", ["a", "b"], 1),
     ]
