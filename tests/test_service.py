@@ -501,6 +501,16 @@ def test_research_provider_profiles_are_registered_with_capability_boundaries():
     assert "challenge page rejection" in profiles["jina"]["quality_filters"]
     assert "known URL extraction" in profiles["jina"]["route_reasons"]
     assert profiles["anysearch"]["experimental"] is True
+    assert profiles["anysearch"]["automatic_domain_search"] is False
+    assert profiles["anysearch"]["automatic_vertical_discovery_requires"] == "ANYSEARCH_API_KEY"
+    assert profiles["anysearch"]["verified_domains"] == []
+    assert profiles["anysearch"]["acceptance_operations"] == [
+        "Domain Discovery",
+        "Vertical Discovery",
+        "explicit domain search",
+        "Batch Discovery",
+        "AnySearch Extraction",
+    ]
 
 
 def test_research_router_prefers_context7_for_docs_and_keeps_anysearch_out(monkeypatch):
@@ -1152,6 +1162,147 @@ def test_anysearch_vertical_status_is_experimental_and_not_minimum_required(monk
     assert with_anysearch["missing"] == []
     assert with_anysearch["required"] == ["main_search", "docs_search", "web_fetch"]
     assert with_anysearch["capability_status"]["vertical_search"]["configured"] == ["anysearch"]
+
+
+def test_anysearch_static_status_is_offline_and_key_controls_both_switches(monkeypatch):
+    def should_not_construct_provider(*args, **kwargs):
+        raise AssertionError("static capability status must not construct or call AnySearch")
+
+    monkeypatch.setattr(service, "AnySearchProvider", should_not_construct_provider)
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+
+    anonymous = service.get_capability_status()["vertical_search"]
+
+    assert anonymous["configured"] == []
+    assert anonymous["automatic_vertical_discovery"] is False
+    assert {item["status"] for item in anonymous["operation_live"].values()} == {"not_run"}
+
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "explicit-environment-key")
+    configured = service.get_capability_status()["vertical_search"]
+
+    assert configured["configured"] == ["anysearch"]
+    assert configured["automatic_vertical_discovery"] is True
+    assert {item["status"] for item in configured["operation_live"].values()} == {"not_run"}
+
+
+@pytest.mark.asyncio
+async def test_anysearch_live_operation_smoke_requires_explicit_environment_key(monkeypatch):
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+
+    def should_not_construct_provider(*args, **kwargs):
+        raise AssertionError("live AnySearch smoke must not use anonymous or saved local configuration")
+
+    monkeypatch.setattr(service, "AnySearchProvider", should_not_construct_provider)
+
+    result = await service._run_anysearch_live_operations()
+
+    assert result["enabled"] is False
+    assert result["domain_results"] == []
+    assert {item["status"] for item in result["operations"].values()} == {"not_run"}
+    assert {item["error_type"] for item in result["operations"].values()} == {"config_error"}
+    assert {(item["operation"], item["tool"]) for item in result["operations"].values()} == {
+        ("discover_domains", "get_sub_domains"),
+        ("vertical_discovery", "search"),
+        ("vertical_search", "search"),
+        ("batch_discovery", "batch_search"),
+        ("anysearch_extraction", "extract"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_anysearch_live_operation_smoke_reports_each_operation_and_domain(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setenv("SMART_SEARCH_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "explicit-environment-key")
+    monkeypatch.setenv("ANYSEARCH_LIVE_ACCEPTANCE", "academic.search,security.vuln")
+    service.config_set("ANYSEARCH_API_URL", "https://saved.anysearch.example/mcp")
+    service.config_set("ANYSEARCH_TIMEOUT_SECONDS", "17")
+
+    class FakeAnySearchProvider:
+        def __init__(self, api_url, api_key, timeout):
+            calls.append(("init", api_url, api_key, timeout))
+
+        async def discover_domains(self, domain):
+            calls.append(("discover_domains", domain))
+            return {"ok": True, "operation": "discover_domains", "tool": "get_sub_domains", "results": []}
+
+        async def vertical_search(self, query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+            calls.append(("vertical_search", query, domain, sub_domain, max_results, sub_domain_params))
+            operation = "vertical_search" if domain else "vertical_discovery"
+            if domain == "security":
+                return {
+                    "ok": False,
+                    "operation": operation,
+                    "tool": "search",
+                    "error_type": "provider_error",
+                    "error": "upstream rejected request",
+                }
+            return {"ok": True, "operation": operation, "tool": "search", "results": []}
+
+        async def batch_search(self, queries, max_results=3):
+            calls.append(("batch_search", queries, max_results))
+            return {"ok": True, "operation": "batch_discovery", "tool": "batch_search", "results": []}
+
+        async def extract(self, url, max_length=20000):
+            calls.append(("extract", url, max_length))
+            return {"ok": True, "operation": "anysearch_extraction", "tool": "extract", "content": "page"}
+
+    monkeypatch.setattr(service, "AnySearchProvider", FakeAnySearchProvider)
+
+    result = await service._run_anysearch_live_operations()
+
+    assert result["enabled"] is True
+    assert calls[0] == ("init", "https://saved.anysearch.example/mcp", "explicit-environment-key", 17.0)
+    assert result["operations"]["discover_domains"]["status"] == "passed"
+    assert result["operations"]["vertical_discovery"]["status"] == "passed"
+    assert result["operations"]["batch_discovery"]["status"] == "passed"
+    assert result["operations"]["anysearch_extraction"]["status"] == "passed"
+    assert result["operations"]["vertical_search"]["status"] == "failed"
+    assert result["operations"]["vertical_search"]["error_type"] == "provider_error"
+    assert [(item["domain"], item["status"]) for item in result["domain_results"]] == [
+        ("academic.search", "passed"),
+        ("security.vuln", "failed"),
+    ]
+    explicit_calls = [item for item in calls if item[0] == "vertical_search" and item[2]]
+    assert explicit_calls[0][2:4] == ("academic", "search")
+    assert explicit_calls[0][5] == {"keywords": "retrieval augmented generation", "year_from": 2024}
+    assert explicit_calls[1][2:4] == ("security", "vuln")
+    assert explicit_calls[1][5] == {"product": "xz", "severity": "critical"}
+
+
+@pytest.mark.asyncio
+async def test_anysearch_live_operation_smoke_all_tracks_manifest_candidates(monkeypatch):
+    monkeypatch.setenv("ANYSEARCH_API_KEY", "explicit-environment-key")
+    monkeypatch.setenv("ANYSEARCH_LIVE_ACCEPTANCE", "all")
+    seen_domains = []
+
+    class FakeAnySearchProvider:
+        def __init__(self, api_url, api_key, timeout):
+            pass
+
+        async def discover_domains(self, domain):
+            return {"ok": True}
+
+        async def vertical_search(self, query, domain="", sub_domain="", max_results=5, sub_domain_params=None):
+            if domain:
+                seen_domains.append(f"{domain}.{sub_domain}")
+            return {"ok": True}
+
+        async def batch_search(self, queries, max_results=3):
+            return {"ok": True}
+
+        async def extract(self, url, max_length=20000):
+            return {"ok": True}
+
+    monkeypatch.setattr(service, "AnySearchProvider", FakeAnySearchProvider)
+
+    result = await service._run_anysearch_live_operations()
+
+    manifest_candidates = [
+        item["id"] for item in service.get_verified_domain_manifest()["candidate_assessments"]
+    ]
+    assert seen_domains == manifest_candidates
+    assert [item["domain"] for item in result["domain_results"]] == manifest_candidates
 
 
 def test_jina_key_satisfies_web_fetch_but_anonymous_jina_does_not(monkeypatch):

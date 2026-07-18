@@ -17,6 +17,8 @@ The fixtures under `tests/fixtures/anysearch/` are sanitized synthetic transport
 
 ## Opt-in live acceptance
 
+For the complete Provider Acceptance Operations smoke, run `ANYSEARCH_API_KEY=... smart-search smoke --live --format json`. It reports Domain Discovery, Vertical Discovery, Batch Discovery, AnySearch Extraction, and explicit domain search independently as `passed`, `failed`, or `not_run`; `ANYSEARCH_LIVE_ACCEPTANCE` selects explicit candidate domains and defaults to `academic.search`. This live result is observational and cannot implement Automatic Domain Search or promote the manifest.
+
 Each candidate can be exercised independently without changing the manifest:
 
 ```bash

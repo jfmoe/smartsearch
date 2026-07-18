@@ -386,6 +386,10 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 
 受版本控制的 Verified Domain Manifest 是支持声明的唯一依据。当前 verified 集合为空：`academic.search`、`security.vuln`、`finance.fundamental`、`code.doc` 都仍是 discovered/unverified，并明确记录 live 与稳定性缺口。`doctor` 分别公开 configured 状态、自动 Vertical Discovery 开关、独立的 operation-live 状态、verified domains 与候选评估。详见[首批领域矩阵](docs/anysearch-verified-domain-manifest.md)；mock fixture 或一次 live 成功都不会自动晋级领域。
 
+这些术语必须严格区分：**Vertical Discovery** 是无域的 `vertical_search` capability 调用；**显式域搜索** 是用户指定 `domain`/`sub_domain` 的 Acceptance Surface 调用；**Provider Acceptance Operations** 包括 Domain Discovery、显式 Vertical Discovery/域搜索、Batch Discovery 与 AnySearch Extraction；**Automatic Domain Search** 尚未实现。无 key 时显式操作仍可匿名尝试；只有 `ANYSEARCH_API_KEY` 同时控制 Configured AnySearch 与自动 Vertical Discovery。`--extra-sources 0` 不会关闭该自动调用，而 Batch Discovery 和 AnySearch Extraction 永远不会自动运行。
+
+静态 `capability_status.vertical_search` 完全离线，分别报告 `configured`、`automatic_vertical_discovery`、`experimental`、manifest 驱动的 `verified_domains` 和五项 `operation_live`。`doctor` 将每项保留为 `not_run`，不会用一个 `ok` 推断整个 provider 可用。`smart-search smoke --mock` 离线覆盖完整契约；`smart-search smoke --live` 只有在进程环境显式提供 `ANYSEARCH_API_KEY` 时，才运行 Domain Discovery、Vertical Discovery、Batch Discovery、AnySearch Extraction 和至少一个 `academic.search` 显式域搜索，否则各项如实为 `not_run`；endpoint 与 timeout 仍遵循“环境变量 → 保存配置 → 默认值”的既有优先级。可用 `ANYSEARCH_LIVE_ACCEPTANCE=academic.search,security.vuln` 或 `all` 选择显式候选域。live 输出按操作及每个已选域分别报告 `passed`、`failed`、`not_run`，稳定包含 `operation`、上游 `tool`、`error_type`，且绝不晋级 manifest。
+
 本机配置文件位置：
 
 - Windows 默认：`%LOCALAPPDATA%\smart-search\config.json`。

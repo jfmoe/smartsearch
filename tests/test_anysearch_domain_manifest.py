@@ -1,16 +1,18 @@
-import json
+import argparse
 import hashlib
+import json
 from pathlib import Path
 
 import httpx
 import pytest
 
-from smart_search import service
+from smart_search import cli, service
 from smart_search.providers.anysearch import AnySearchProvider, get_verified_domain_manifest
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "anysearch"
 CANDIDATES = ("academic.search", "security.vuln", "finance.fundamental", "code.doc")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _fixture(candidate: str) -> dict:
@@ -81,16 +83,71 @@ def test_verified_domain_manifest_is_runtime_readable_and_initially_empty(monkey
     assert status["automatic_vertical_discovery"] is True
     assert status["experimental"] is True
     assert status["operation_live"] == {
-        "discover_domains": {"status": "not_checked"},
-        "vertical_discovery": {"status": "not_checked"},
-        "vertical_search": {"status": "not_checked"},
-        "batch_discovery": {"status": "not_checked"},
-        "anysearch_extraction": {"status": "not_checked"},
+        "discover_domains": {
+            "status": "not_run",
+            "operation": "discover_domains",
+            "tool": "get_sub_domains",
+            "error_type": "",
+        },
+        "vertical_discovery": {
+            "status": "not_run",
+            "operation": "vertical_discovery",
+            "tool": "search",
+            "error_type": "",
+        },
+        "vertical_search": {
+            "status": "not_run",
+            "operation": "vertical_search",
+            "tool": "search",
+            "error_type": "",
+        },
+        "batch_discovery": {
+            "status": "not_run",
+            "operation": "batch_discovery",
+            "tool": "batch_search",
+            "error_type": "",
+        },
+        "anysearch_extraction": {
+            "status": "not_run",
+            "operation": "anysearch_extraction",
+            "tool": "extract",
+            "error_type": "",
+        },
     }
     assert status["verified_domains"] == []
     assert status["verified_domain_count"] == 0
     assert status["domain_search_ready"] is False
     assert [item["id"] for item in status["domain_assessments"]] == list(CANDIDATES)
+
+
+def test_public_and_packaged_skill_match_cli_status_and_verified_contract():
+    public_root = ROOT / "skills" / "smart-search-cli"
+    packaged_root = ROOT / "src" / "smart_search" / "assets" / "skills" / "smart-search-cli"
+    relative_files = ("SKILL.md", "references/cli-core.md", "references/provider-routing.md")
+    for relative in relative_files:
+        assert (public_root / relative).read_text(encoding="utf-8") == (packaged_root / relative).read_text(
+            encoding="utf-8"
+        )
+
+    cli_core = (public_root / "references" / "cli-core.md").read_text(encoding="utf-8")
+    routing = (public_root / "references" / "provider-routing.md").read_text(encoding="utf-8")
+    assert (
+        "smart-search anysearch-search QUERY [--domain DOMAIN --sub-domain SUB_DOMAIN "
+        "[--sub-domain-params JSON_OBJECT]] [--max-results N]"
+    ) in cli_core
+    assert "`configured`, `automatic_vertical_discovery`, `experimental`, and `operation_live`" in cli_core
+    assert "`verified_domains`, `verified_domain_count`, `domain_search_ready`" in cli_core
+    assert "verified set is initially empty" in routing
+    assert "Automatic Domain Search is not implemented" in routing
+
+    parser = cli.build_parser()
+    subparsers = next(
+        action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+    )
+    anysearch_search = subparsers.choices["anysearch-search"]
+    option_strings = {option for action in anysearch_search._actions for option in action.option_strings}
+    assert {"--domain", "--sub-domain", "--sub-domain-params", "--max-results"} <= option_strings
+    assert get_verified_domain_manifest()["verified_domains"] == []
 
 
 def test_candidate_schema_fingerprints_match_versioned_sanitized_fixtures():

@@ -2928,7 +2928,7 @@ def build_parser() -> argparse.ArgumentParser:
     anysearch_domains_parser = sub.add_parser(
         "anysearch-domains",
         aliases=COMMAND_ALIASES["anysearch-domains"],
-        help="Discover AnySearch sub-domains for a required parent DOMAIN.",
+        help="Run the explicit AnySearch Domain Discovery Provider Acceptance Operation.",
     )
     anysearch_domains_parser.set_defaults(command="anysearch-domains")
     anysearch_domains_parser.add_argument(
@@ -2943,7 +2943,7 @@ def build_parser() -> argparse.ArgumentParser:
     anysearch_search_parser = sub.add_parser(
         "anysearch-search",
         aliases=COMMAND_ALIASES["anysearch-search"],
-        help="Run AnySearch Vertical Discovery or an explicit domain/sub-domain search.",
+        help="Run Vertical Discovery or explicit domain search; Automatic Domain Search is not implemented.",
     )
     anysearch_search_parser.set_defaults(command="anysearch-search")
     anysearch_search_parser.add_argument("query")
@@ -3028,7 +3028,13 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_mode = smoke_parser.add_mutually_exclusive_group()
     smoke_mode.add_argument("--mode", choices=["mock", "live"], default=None)
     smoke_mode.add_argument("--mock", dest="mode", action="store_const", const="mock", help="Run offline mock smoke checks.")
-    smoke_mode.add_argument("--live", dest="mode", action="store_const", const="live", help="Run live provider smoke checks.")
+    smoke_mode.add_argument(
+        "--live",
+        dest="mode",
+        action="store_const",
+        const="live",
+        help="Run live provider checks, including per-operation AnySearch acceptance with an environment ANYSEARCH_API_KEY.",
+    )
     smoke_parser.set_defaults(mode="mock")
     _add_format_args(smoke_parser)
 

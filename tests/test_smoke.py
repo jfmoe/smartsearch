@@ -21,6 +21,9 @@ async def test_mock_smoke_passes():
     assert result["failed_cases"] == []
     assert any(case["name"] == "docs_search fallback context7_to_exa" for case in result["cases"])
     assert any(case["name"] == "deep_research explicit planner simple current prompt uses capability plan" for case in result["cases"])
+    assert result["anysearch_operations"]["enabled"] is False
+    assert {item["status"] for item in result["anysearch_operations"]["operations"].values()} == {"passed"}
+    assert any(case["name"] == "AnySearch Provider Acceptance Operations offline contract" for case in result["cases"])
 
 
 @pytest.mark.asyncio
@@ -95,6 +98,73 @@ async def test_live_smoke_treats_provider_failure_as_degraded_when_fallback_exis
     assert result["ok"] is True
     assert result["failed_cases"] == []
     assert result["degraded_cases"] == ["zhipu search"]
+
+
+@pytest.mark.asyncio
+async def test_live_smoke_exposes_anysearch_operation_and_domain_results(monkeypatch):
+    for key in ("ZHIPU_API_KEY", "CONTEXT7_API_KEY", "TAVILY_API_KEY", "FIRECRAWL_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
+    capability_status = {
+        "main_search": {"configured": ["openai-compatible"], "ok": True},
+        "web_search": {"configured": [], "ok": False},
+        "docs_search": {"configured": ["exa"], "ok": True},
+        "web_fetch": {"configured": ["jina"], "ok": True},
+        "vertical_search": {
+            "configured": ["anysearch"],
+            "automatic_vertical_discovery": True,
+            "experimental": True,
+            "operation_live": service._anysearch_not_run_operations(),
+            "verified_domains": [],
+        },
+    }
+
+    async def fake_doctor():
+        return {
+            "minimum_profile_ok": True,
+            "error_type": "",
+            "error": "",
+            "capability_status": capability_status,
+            "zhipu_connection_test": {"status": "not_configured"},
+            "context7_connection_test": {"status": "not_configured"},
+        }
+
+    operations = {
+        operation: service._anysearch_operation_status(operation, "passed")
+        for operation in service.ANYSEARCH_OPERATION_TOOLS
+    }
+
+    async def fake_anysearch_operations():
+        return {
+            "enabled": True,
+            "operations": operations,
+            "domain_results": [
+                {
+                    "domain": "academic.search",
+                    **service._anysearch_operation_status("vertical_search", "passed"),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(service, "doctor", fake_doctor)
+    monkeypatch.setattr(service, "_run_anysearch_live_operations", fake_anysearch_operations)
+
+    result = await service.smoke("live")
+
+    assert result["ok"] is True
+    assert result["anysearch_operations"]["domain_results"][0]["domain"] == "academic.search"
+    assert result["capability_status"]["vertical_search"]["operation_live"] == operations
+    assert {
+        (case["operation"], case["tool"], case["status"])
+        for case in result["cases"]
+        if case["name"].startswith("AnySearch ")
+    } == {
+        ("discover_domains", "get_sub_domains", "passed"),
+        ("vertical_discovery", "search", "passed"),
+        ("vertical_search", "search", "passed"),
+        ("batch_discovery", "batch_search", "passed"),
+        ("anysearch_extraction", "extract", "passed"),
+    }
 
 
 @pytest.mark.asyncio

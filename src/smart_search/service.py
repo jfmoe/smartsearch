@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import re
 import tempfile
 import time
@@ -260,12 +261,28 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     },
     "anysearch": {
         "capability": "vertical_search",
-        "strengths": ["CVE", "finance", "legal", "academic", "code/docs", "structured vertical domains"],
-        "exclusions": ["generic default fallback", "standard minimum profile"],
+        "strengths": ["domain-less Vertical Discovery", "explicit Provider Acceptance Operations"],
+        "exclusions": [
+            "generic default fallback",
+            "standard minimum profile",
+            "Web Search",
+            "Web Fetch",
+            "Automatic Domain Search",
+        ],
         "fallback_group": "vertical_search",
         "minimum_profile_role": "",
         "quality_filters": ["vertical intent required", "URL required before evidence citation"],
-        "route_reasons": ["vertical domain discovery"],
+        "route_reasons": ["Vertical Discovery for explicit vertical intent"],
+        "acceptance_operations": [
+            "Domain Discovery",
+            "Vertical Discovery",
+            "explicit domain search",
+            "Batch Discovery",
+            "AnySearch Extraction",
+        ],
+        "anonymous_explicit_operations": True,
+        "automatic_vertical_discovery_requires": "ANYSEARCH_API_KEY",
+        "automatic_domain_search": False,
         "experimental": True,
     },
     "main-search": {
@@ -550,7 +567,12 @@ def _fallback_used(attempts: list[dict]) -> bool:
 
 
 def provider_profiles() -> dict[str, dict[str, Any]]:
-    return {provider: dict(profile) for provider, profile in PROVIDER_PROFILES.items()}
+    profiles = {provider: dict(profile) for provider, profile in PROVIDER_PROFILES.items()}
+    manifest = get_verified_domain_manifest()
+    profiles["anysearch"]["verified_domains"] = [
+        f"{item['domain']}.{item['sub_domain']}" for item in manifest["verified_domains"]
+    ]
+    return profiles
 
 
 def intent_router_status() -> dict[str, Any]:
@@ -1493,16 +1515,7 @@ def get_capability_status() -> dict[str, Any]:
             "fallback_chain": ["anysearch"],
             "experimental": True,
             "automatic_vertical_discovery": bool(config.anysearch_api_key),
-            "operation_live": {
-                operation: {"status": "not_checked"}
-                for operation in (
-                    "discover_domains",
-                    "vertical_discovery",
-                    "vertical_search",
-                    "batch_discovery",
-                    "anysearch_extraction",
-                )
-            },
+            "operation_live": _anysearch_not_run_operations(),
             "verified_domains": [
                 f"{item['domain']}.{item['sub_domain']}" for item in anysearch_manifest["verified_domains"]
             ],
@@ -1514,6 +1527,196 @@ def get_capability_status() -> dict[str, Any]:
     for capability in ("web_search", "docs_search", "web_fetch", "vertical_search"):
         status[capability]["ok"] = bool(status[capability]["configured"])
     return status
+
+
+ANYSEARCH_OPERATION_TOOLS = {
+    "discover_domains": "get_sub_domains",
+    "vertical_discovery": "search",
+    "vertical_search": "search",
+    "batch_discovery": "batch_search",
+    "anysearch_extraction": "extract",
+}
+
+ANYSEARCH_LIVE_DOMAIN_CASES = {
+    "academic.search": {
+        "domain": "academic",
+        "sub_domain": "search",
+        "params": {"keywords": "retrieval augmented generation", "year_from": 2024},
+    },
+    "security.vuln": {
+        "domain": "security",
+        "sub_domain": "vuln",
+        "params": {"product": "xz", "severity": "critical"},
+    },
+    "finance.fundamental": {
+        "domain": "finance",
+        "sub_domain": "fundamental",
+        "params": {"ticker": "AAPL", "period": "annual"},
+    },
+    "code.doc": {
+        "domain": "code",
+        "sub_domain": "doc",
+        "params": {"repository": "openai/openai-python", "language": "python"},
+    },
+}
+
+
+def _anysearch_operation_status(
+    operation: str,
+    status: str,
+    *,
+    error_type: str = "",
+    error: str = "",
+) -> dict[str, Any]:
+    item = {
+        "status": status,
+        "operation": operation,
+        "tool": ANYSEARCH_OPERATION_TOOLS[operation],
+        "error_type": error_type,
+    }
+    if error:
+        item["error"] = error
+    return item
+
+
+def _anysearch_not_run_operations(*, error_type: str = "", error: str = "") -> dict[str, dict[str, Any]]:
+    return {
+        operation: _anysearch_operation_status(operation, "not_run", error_type=error_type, error=error)
+        for operation in ANYSEARCH_OPERATION_TOOLS
+    }
+
+
+def _anysearch_observation(operation: str, result: dict[str, Any]) -> dict[str, Any]:
+    return _anysearch_operation_status(
+        operation,
+        "passed" if result.get("ok") else "failed",
+        error_type="" if result.get("ok") else result.get("error_type", "runtime_error"),
+        error="" if result.get("ok") else result.get("error", "AnySearch operation failed"),
+    )
+
+
+async def _run_anysearch_live_operations() -> dict[str, Any]:
+    """Run explicitly enabled live AnySearch acceptance operations.
+
+    The live lane intentionally requires an environment key instead of consulting
+    saved local configuration. Explicit CLI operations may still run anonymously;
+    smoke must never do so implicitly.
+    """
+    api_key = os.environ.get("ANYSEARCH_API_KEY", "").strip()
+    if not api_key:
+        error = "Set ANYSEARCH_API_KEY in the environment to enable AnySearch live smoke."
+        return {
+            "enabled": False,
+            "operations": _anysearch_not_run_operations(error_type="config_error", error=error),
+            "domain_results": [],
+        }
+
+    manifest_candidates = [item["id"] for item in get_verified_domain_manifest()["candidate_assessments"]]
+    if set(manifest_candidates) != set(ANYSEARCH_LIVE_DOMAIN_CASES):
+        error = "AnySearch live smoke cases do not match the versioned candidate manifest."
+        return {
+            "enabled": True,
+            "operations": {
+                operation: _anysearch_operation_status(
+                    operation, "failed", error_type="runtime_error", error=error
+                )
+                for operation in ANYSEARCH_OPERATION_TOOLS
+            },
+            "domain_results": [],
+        }
+
+    selected_raw = [
+        item.strip()
+        for item in os.environ.get("ANYSEARCH_LIVE_ACCEPTANCE", "academic.search").split(",")
+        if item.strip()
+    ]
+    unknown = [item for item in selected_raw if item != "all" and item not in ANYSEARCH_LIVE_DOMAIN_CASES]
+    selected = manifest_candidates if "all" in selected_raw else selected_raw
+    if unknown or not selected:
+        error = "Unknown ANYSEARCH_LIVE_ACCEPTANCE candidate: " + ", ".join(unknown or ["<empty>"])
+        operations = _anysearch_not_run_operations()
+        operations["vertical_search"] = _anysearch_operation_status(
+            "vertical_search", "failed", error_type="parameter_error", error=error
+        )
+        return {"enabled": True, "operations": operations, "domain_results": []}
+
+    try:
+        timeout = config.anysearch_timeout
+        if timeout <= 0:
+            raise ValueError
+    except ValueError:
+        error = "ANYSEARCH_TIMEOUT_SECONDS must be a positive number."
+        return {
+            "enabled": True,
+            "operations": {
+                operation: _anysearch_operation_status(
+                    operation, "failed", error_type="config_error", error=error
+                )
+                for operation in ANYSEARCH_OPERATION_TOOLS
+            },
+            "domain_results": [],
+        }
+
+    provider = AnySearchProvider(
+        config.anysearch_api_url,
+        api_key,
+        timeout,
+    )
+
+    async def observe(operation: str, call) -> dict[str, Any]:
+        try:
+            return _anysearch_observation(operation, await call())
+        except Exception as error:  # pragma: no cover - defensive provider boundary
+            return _anysearch_operation_status(
+                operation, "failed", error_type="runtime_error", error=str(error)
+            )
+
+    first_case = ANYSEARCH_LIVE_DOMAIN_CASES[selected[0]]
+    operations = {
+        "discover_domains": await observe(
+            "discover_domains", lambda: provider.discover_domains(first_case["domain"])
+        ),
+        "vertical_discovery": await observe(
+            "vertical_discovery",
+            lambda: provider.vertical_search("AnySearch live Vertical Discovery", max_results=1),
+        ),
+        "batch_discovery": await observe(
+            "batch_discovery",
+            lambda: provider.batch_search(["AnySearch live Batch Discovery"], max_results=1),
+        ),
+        "anysearch_extraction": await observe(
+            "anysearch_extraction",
+            lambda: provider.extract("https://example.com", max_length=2000),
+        ),
+    }
+
+    domain_results: list[dict[str, Any]] = []
+    for candidate in selected:
+        case = ANYSEARCH_LIVE_DOMAIN_CASES[candidate]
+        observed = await observe(
+            "vertical_search",
+            lambda case=case, candidate=candidate: provider.vertical_search(
+                f"AnySearch live explicit domain search for {candidate}",
+                domain=case["domain"],
+                sub_domain=case["sub_domain"],
+                sub_domain_params=case["params"],
+                max_results=1,
+            ),
+        )
+        domain_results.append({"domain": candidate, **observed})
+
+    failed_domains = [item for item in domain_results if item["status"] == "failed"]
+    operations["vertical_search"] = (
+        _anysearch_operation_status(
+            "vertical_search",
+            "failed",
+            error_type=failed_domains[0]["error_type"],
+            error=failed_domains[0].get("error", "AnySearch explicit domain search failed"),
+        )
+        if failed_domains
+        else _anysearch_operation_status("vertical_search", "passed")
+    )
+    return {"enabled": True, "operations": operations, "domain_results": domain_results}
 
 
 def _minimum_profile_result(profile: str, capability_status: dict[str, Any]) -> dict[str, Any]:
@@ -3939,6 +4142,27 @@ def _case_failed(case: dict[str, Any]) -> bool:
 
 async def _smoke_mock(start: float) -> dict[str, Any]:
     cases: list[dict[str, Any]] = []
+    mock_anysearch_operations = {
+        "enabled": False,
+        "mode": "mock",
+        "operations": {
+            operation: _anysearch_operation_status(operation, "passed")
+            for operation in ANYSEARCH_OPERATION_TOOLS
+        },
+        "domain_results": [
+            {
+                "domain": "academic.search",
+                **_anysearch_operation_status("vertical_search", "passed"),
+            }
+        ],
+    }
+    cases.append(
+        _case(
+            "AnySearch Provider Acceptance Operations offline contract",
+            all(item["status"] == "passed" for item in mock_anysearch_operations["operations"].values()),
+            {"anysearch_operations": mock_anysearch_operations},
+        )
+    )
 
     minimum_status = {
         "main_search": {
@@ -4243,6 +4467,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "provider_attempts": all_attempts,
         "providers_used": _provider_names_from_attempts(all_attempts),
         "fallback_used": _fallback_used(all_attempts),
+        "anysearch_operations": mock_anysearch_operations,
         "elapsed_ms": _elapsed_ms(start),
     }
 
@@ -4307,6 +4532,20 @@ async def _smoke_live(start: float) -> dict[str, Any]:
     else:
         cases.append(_case("web fetch fallback chain", True, {"skipped": "no fetch providers configured"}))
 
+    anysearch_operations = await _run_anysearch_live_operations()
+    operation_live = anysearch_operations["operations"]
+    vertical_status = capability_status.get("vertical_search")
+    if isinstance(vertical_status, dict):
+        vertical_status["operation_live"] = operation_live
+    for operation, observation in operation_live.items():
+        cases.append(
+            _case(
+                f"AnySearch {operation}",
+                observation["status"] != "failed",
+                observation,
+            )
+        )
+
     failed = [c["name"] for c in cases if _case_failed(c)]
     degraded = [c["name"] for c in cases if not c.get("ok") and c.get("severity") == "degraded"]
     attempts: list[dict] = []
@@ -4319,6 +4558,8 @@ async def _smoke_live(start: float) -> dict[str, Any]:
         "degraded_cases": degraded,
         "cases": cases,
         "provider_attempts": attempts,
+        "capability_status": capability_status,
+        "anysearch_operations": anysearch_operations,
         "elapsed_ms": _elapsed_ms(start),
     }
 
