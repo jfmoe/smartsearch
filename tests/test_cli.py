@@ -829,7 +829,6 @@ def test_markdown_search_exposes_structured_vertical_discovery_without_source_li
                 "tool": "search",
                 "experimental": True,
                 "results": [{"url": "", "description": "candidate only"}],
-                "raw_result": {"structuredContent": {"candidate": "paper"}},
             },
         }
 

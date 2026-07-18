@@ -69,7 +69,7 @@ async def test_anysearch_jsonrpc_success_parses_markdown_and_auth_header(monkeyp
     assert data["tool"] == "search"
     assert data["domain"] == "code"
     assert data["sub_domain"] == "doc"
-    assert data["raw_content"].startswith("### 1. React hooks")
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
     assert data["results"][0]["url"] == "https://react.dev/reference/react"
     assert data["results"][0]["title"] == "React hooks"
     call = FakeAnySearchClient.calls[0]
@@ -84,8 +84,35 @@ async def test_anysearch_jsonrpc_success_parses_markdown_and_auth_header(monkeyp
         "tags": ["hooks"],
     }
     assert data["sub_domain_param_keys"] == ["language", "tags"]
-    assert "language" not in data.get("content", "")
     assert call["timeout"].read == 12.0
+
+
+@pytest.mark.asyncio
+async def test_anysearch_search_returns_compact_descriptions_without_raw_content(monkeypatch):
+    FakeAnySearchClient.response = httpx.Response(
+        200,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "### 1. Kyoto guide\n- **URL**: https://example.com/kyoto\n" + "x" * 600,
+                    }
+                ]
+            },
+        },
+        request=httpx.Request("POST", "https://api.anysearch.com/mcp"),
+    )
+    monkeypatch.setattr("smart_search.providers.anysearch.httpx.AsyncClient", FakeAnySearchClient)
+
+    data = await AnySearchProvider("https://api.anysearch.com/mcp").vertical_search("Kyoto travel guide")
+
+    assert data["results"] == [
+        {"title": "Kyoto guide", "url": "https://example.com/kyoto", "description": "x" * 300}
+    ]
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
 
 
 @pytest.mark.asyncio
@@ -129,7 +156,7 @@ async def test_anysearch_result_is_error_is_provider_error_without_sources(monke
     assert data["error_type"] == "provider_error"
     assert data["error"].startswith("invalid ")
     assert data["results"] == []
-    assert data["raw_content"] == data["error"]
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
 
 
 @pytest.mark.asyncio
@@ -198,7 +225,8 @@ async def test_anysearch_structured_result_without_url_is_preserved(monkeypatch)
     assert data["total"] == 1
     assert data["results"][0]["evidence_type"] == "structured"
     assert data["results"][0]["url"] == ""
-    assert "CVE-2024-3094" in data["results"][0]["raw_content"]
+    assert "CVE-2024-3094" in data["results"][0]["description"]
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
 
 
 @pytest.mark.asyncio
@@ -225,7 +253,9 @@ async def test_anysearch_batch_sends_live_compatible_query_objects(monkeypatch):
                 "content": [
                     {
                         "type": "text",
-                        "text": "## Query 1: React hooks\n\n### 1. Built-in React Hooks\n- **URL**: https://react.dev/reference/react/hooks",
+                        "text": "## Query 1: React hooks\n\n### 1. Built-in React Hooks\n"
+                        "- **URL**: https://react.dev/reference/react/hooks\n"
+                        + "x" * 600,
                     }
                 ]
             },
@@ -240,6 +270,14 @@ async def test_anysearch_batch_sends_live_compatible_query_objects(monkeypatch):
     assert data["ok"] is True
     assert data["operation"] == "batch_discovery"
     assert data["capability"] is None
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
+    assert data["results"] == [
+        {
+            "title": "Built-in React Hooks",
+            "url": "https://react.dev/reference/react/hooks",
+            "description": "x" * 300,
+        }
+    ]
     call = FakeAnySearchClient.calls[0]
     assert call["json"]["params"]["name"] == "batch_search"
     assert call["json"]["params"]["arguments"]["queries"] == [
@@ -250,7 +288,27 @@ async def test_anysearch_batch_sends_live_compatible_query_objects(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anysearch_discovery_normalizes_schema_and_preserves_raw_result(monkeypatch):
+async def test_anysearch_extract_returns_one_content_copy_without_raw_fields(monkeypatch):
+    FakeAnySearchClient.response = httpx.Response(
+        200,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {"content": [{"type": "text", "text": "Extracted page body"}]},
+        },
+        request=httpx.Request("POST", "https://api.anysearch.com/mcp"),
+    )
+    monkeypatch.setattr("smart_search.providers.anysearch.httpx.AsyncClient", FakeAnySearchClient)
+
+    data = await AnySearchProvider("https://api.anysearch.com/mcp").extract("https://example.com")
+
+    assert data["ok"] is True
+    assert data["content"] == "Extracted page body"
+    assert {"raw_content", "raw_result"}.isdisjoint(data)
+
+
+@pytest.mark.asyncio
+async def test_anysearch_discovery_normalizes_schema_without_returning_raw_content(monkeypatch):
     structured = {
         "sub_domains": [
             {
@@ -280,7 +338,6 @@ async def test_anysearch_discovery_normalizes_schema_and_preserves_raw_result(mo
 
     data = await AnySearchProvider("https://api.anysearch.com/mcp").discover_domains("security")
 
-    assert data["raw_result"]["structuredContent"] == structured
     assert data["results"] == [
         {
             "domain": "security",
@@ -289,6 +346,7 @@ async def test_anysearch_discovery_normalizes_schema_and_preserves_raw_result(mo
             "parameter_schema": structured["sub_domains"][0]["parameters"],
         }
     ]
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)
     assert FakeAnySearchClient.calls[0]["json"]["params"]["name"] == "get_sub_domains"
 
 
@@ -378,8 +436,6 @@ async def test_anysearch_transport_failures_have_stable_error_types(monkeypatch,
             "tool",
             "experimental",
             "elapsed",
-            "content",
-            "raw_content",
             "results",
             "error",
             "error_type",
@@ -471,5 +527,4 @@ async def test_anysearch_provider_error_redacts_request_values(monkeypatch):
     assert data["error_type"] == "provider_error"
     assert "secret-query" not in dumped
     assert "secret-param" not in dumped
-    assert data["raw_content"] == data["error"]
-    assert "raw_result" not in data
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(data)

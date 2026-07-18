@@ -12,6 +12,33 @@ from .base import BaseSearchProvider
 _RESERVED_SUB_DOMAIN_FIELDS = {"query", "domain", "sub_domain", "max_results"}
 _FORBIDDEN_LEGACY_SUB_DOMAINS = {("security", "cve")}
 _MANIFEST_RESOURCE = "assets/anysearch/verified-domain-manifest.json"
+ANYSEARCH_DESCRIPTION_LIMIT = 300
+
+
+def compact_vertical_discovery_output(data: dict[str, Any]) -> dict[str, Any]:
+    """Project AnySearch discovery output onto the compact extra-source seam."""
+    compact = {
+        key: value
+        for key, value in data.items()
+        if key not in {"content", "raw_content", "raw_result"}
+    }
+    compact_results: list[dict[str, Any]] = []
+    for item in data.get("results") or []:
+        if not isinstance(item, dict):
+            continue
+        result: dict[str, Any] = {"url": str(item.get("url") or item.get("link") or "").strip()}
+        title = str(item.get("title") or "").strip()
+        if title:
+            result["title"] = title
+        description = str(item.get("description") or item.get("snippet") or item.get("content") or "").strip()
+        if description:
+            result["description"] = description[:ANYSEARCH_DESCRIPTION_LIMIT]
+        if item.get("evidence_type") == "structured":
+            result["evidence_type"] = "structured"
+        compact_results.append(result)
+    compact["results"] = compact_results
+    compact["total"] = len(compact_results)
+    return compact
 
 
 def get_verified_domain_manifest() -> dict[str, Any]:
@@ -137,7 +164,8 @@ def _parse_markdown_results(text: str) -> list[dict[str, str]]:
             current["url"] = url_match.group(1).strip()
             continue
         if line.strip() and not line.startswith("#") and not line.startswith("- **URL**"):
-            current["description"] = (current["description"] + " " + line.strip()).strip()
+            description = (current["description"] + " " + line.strip()).strip()
+            current["description"] = description[:ANYSEARCH_DESCRIPTION_LIMIT]
     if current:
         results.append(current)
     if results:
@@ -190,7 +218,9 @@ def _normalize_discovery(domain: str, result: dict[str, Any], text: str) -> list
         entry = {
             "domain": domain,
             "sub_domain": sub_domain,
-            "description": item.get("description") if isinstance(item.get("description"), str) else "",
+            "description": item.get("description", "")[:ANYSEARCH_DESCRIPTION_LIMIT]
+            if isinstance(item.get("description"), str)
+            else "",
             "parameter_schema": schema,
         }
         normalized.append(entry)
@@ -207,8 +237,6 @@ def _base_output(operation: str, tool: str, capability: str | None, elapsed: flo
         "experimental": True,
         "elapsed": elapsed,
         "elapsed_ms": elapsed,
-        "content": "",
-        "raw_content": "",
         "results": [],
         "error": "",
         "error_type": "",
@@ -250,8 +278,6 @@ class AnySearchProvider(BaseSearchProvider):
             )
         output = await self.call_tool("discover_domains", "get_sub_domains", {"domain": domain}, None)
         output["domain"] = domain
-        if output["ok"]:
-            output["results"] = _normalize_discovery(domain, output.get("raw_result") or {}, output["raw_content"])
         return output
 
     async def vertical_search(
@@ -469,27 +495,28 @@ class AnySearchProvider(BaseSearchProvider):
             output.update(error_type="parse_error", error="AnySearch JSON-RPC result must be an object")
             return output
         text = _extract_text(result)
-        output.update(content=text, raw_content=text, raw_result=result)
         if result.get("isError"):
             safe_message = _safe_error(text or "AnySearch tool returned isError=true", secrets)
-            output.pop("raw_result", None)
             output.update(
-                content=safe_message,
-                raw_content=safe_message,
                 error_type="provider_error",
                 error=safe_message,
             )
             return output
 
-        parsed_results = _parse_markdown_results(text)
-        if text and not parsed_results and operation != "discover_domains":
+        if operation == "discover_domains":
+            parsed_results = _normalize_discovery(str(arguments.get("domain") or ""), result, text)
+        elif operation == "anysearch_extraction":
+            output.update(ok=True, content=text, total=0)
+            return output
+        else:
+            parsed_results = _parse_markdown_results(text)
+        if text and not parsed_results and operation not in {"discover_domains", "anysearch_extraction"}:
             parsed_results = [
                 {
                     "title": f"{operation} structured result",
                     "url": "",
-                    "description": text[:500],
+                    "description": text[:ANYSEARCH_DESCRIPTION_LIMIT],
                     "evidence_type": "structured",
-                    "raw_content": text,
                 }
             ]
         output.update(ok=True, results=parsed_results, total=len(parsed_results))

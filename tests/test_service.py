@@ -1988,7 +1988,15 @@ async def test_search_vertical_discovery_runs_after_main_success_with_extra_sour
             "operation": "vertical_discovery",
             "tool": "search",
             "experimental": True,
-            "results": [{"url": "https://game.example.com/guide", "title": "Guide"}],
+            "content": "full provider content",
+            "raw_content": "full provider content",
+            "results": [
+                {
+                    "url": "https://game.example.com/guide",
+                    "title": "Guide",
+                    "description": "x" * 600,
+                }
+            ],
             "raw_result": {"structuredContent": {"route": "upstream-selected"}},
         }
 
@@ -2005,10 +2013,16 @@ async def test_search_vertical_discovery_runs_after_main_success_with_extra_sour
     assert result["ok"] is True
     assert calls == [("Elden Ring 游戏攻略", "", "", None)]
     assert result["extra_sources"] == [
-        {"url": "https://game.example.com/guide", "provider": "anysearch", "title": "Guide"}
+        {
+            "url": "https://game.example.com/guide",
+            "provider": "anysearch",
+            "title": "Guide",
+            "description": "x" * 300,
+        }
     ]
     assert result["vertical_discovery"]["operation"] == "vertical_discovery"
-    assert result["vertical_discovery"]["raw_result"]["structuredContent"]["route"] == "upstream-selected"
+    assert result["vertical_discovery"]["results"][0]["description"] == "x" * 300
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(result["vertical_discovery"])
     attempt = next(item for item in result["provider_attempts"] if item["provider"] == "anysearch")
     assert (attempt["operation"], attempt["tool"], attempt["status"]) == ("vertical_discovery", "search", "ok")
 
@@ -2069,7 +2083,7 @@ async def test_search_preserves_structured_vertical_result_without_faking_source
     assert result["extra_sources"] == []
     assert result["sources"] == [{"url": "https://primary.example.com"}]
     assert result["vertical_discovery"]["results"][0]["evidence_type"] == "structured"
-    assert result["vertical_discovery"]["raw_result"]["structuredContent"] == {"answer": "candidate only"}
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(result["vertical_discovery"])
 
 
 @pytest.mark.asyncio
@@ -2156,7 +2170,10 @@ async def test_research_vertical_discovery_is_domainless_and_preserves_structure
 
     assert calls == [("academic paper retrieval", "", "", None)]
     assert result["vertical_discovery"]["operation"] == "vertical_discovery"
-    assert result["vertical_discovery"]["raw_result"]["structuredContent"] == {"candidate": "paper"}
+    assert {"content", "raw_content", "raw_result"}.isdisjoint(result["vertical_discovery"])
+    assert result["vertical_discovery"]["results"] == [
+        {"url": "", "description": "structured candidate"}
+    ]
     assert result["discovery_sources"] == []
     assert result["evidence_items"] == []
 

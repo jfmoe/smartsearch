@@ -389,10 +389,13 @@ AnySearch boundary:
   `main_search` fallback chains without a separate acceptance/routing task.
 - AnySearch uses JSON-RPC 2.0 `tools/call` with tool names `get_sub_domains`,
   `search`, `extract`, and `batch_search`.
-- AnySearch search/extract results must preserve raw markdown/text content.
-  URL/title/snippet candidates should be extracted when present, but
-  structured evidence without URLs must remain in the result instead of being
-  discarded.
+- AnySearch search and batch results expose compact URL/title/description
+  candidates with descriptions capped at 300 characters. They must not return
+  duplicate `content`, `raw_content`, or `raw_result` payloads. URL-less
+  structured results remain compact provider results instead of being
+  discarded or promoted to source/evidence. Extraction is the content-bearing
+  operation and returns one `content` copy without raw duplicates; use the
+  normal `fetch` command for full content after discovering a URL.
 - `anysearch-batch` accepts at most five queries. Reject larger batches before
   sending a network request.
 
@@ -526,10 +529,12 @@ Output contracts:
   preserving the base attempt fields. `transport_fallback_used` reports
   stream-to-non-stream recovery separately; `fallback_used` continues to mean
   provider or model fallback and must not be set by transport fallback alone.
-- AnySearch command output must include `provider="anysearch"`, `tool`,
-  `content`/`raw_content` when available, `results`, and `elapsed_ms` on
-  success. Failures must include stable `ok=false`, `error_type`, `error`,
-  `provider`, `tool`, and `elapsed_ms` fields.
+- AnySearch command output must include `provider="anysearch"`, `tool`, compact
+  `results`, and `elapsed_ms` on search, batch, and discovery success.
+  Extraction additionally includes one `content` field. AnySearch output must
+  not include `raw_content` or `raw_result`. Failures must include stable
+  `ok=false`, `error_type`, `error`, `provider`, `tool`, and `elapsed_ms`
+  fields.
 - Current/realtime web routing must expose `web_current_intent` while keeping
   `zh_current_intent` as a backward-compatible alias, and should list
   supplemental capability paths under `routing_decision.supplemental_paths`.
@@ -878,8 +883,9 @@ When this contract changes, add or update tests that assert:
 - AnySearch capability status is `vertical_search`, `experimental=true`, and
   does not change required minimum capabilities;
 - AnySearch JSON-RPC success, `result.isError=true`, JSON-RPC error, HTTP
-  error, timeout, anonymous request, authenticated header, raw markdown parsing,
-  structured evidence without URL, and batch limit are covered;
+  error, timeout, anonymous request, authenticated header, compact markdown
+  parsing, structured results without URL, extraction content, and batch limit
+  are covered;
 - `doctor()` tests configured main providers independently;
 - general queries do not call docs providers;
 - docs queries use Exa before Context7;

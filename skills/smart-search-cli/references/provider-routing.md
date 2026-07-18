@@ -107,8 +107,8 @@ AnySearch:
 - `ANYSEARCH_API_KEY` is optional. If configured, requests include `Authorization: Bearer ...`; if missing, anonymous requests are allowed.
 - `ANYSEARCH_TIMEOUT_SECONDS` defaults to `30`.
 - HTTP 200 responses with `result.isError=true` must return `ok=false`, `error_type=provider_error`, and no successful source results.
-- Markdown URL/title/snippet candidates should be parsed into `results`, while raw text remains in `content` and `raw_content`.
-- Structured results without URLs must be preserved as raw/structured evidence, not dropped.
+- Markdown URL/title/snippet candidates are parsed into compact `results` with descriptions capped at 300 characters. Search, batch, and discovery omit duplicate `content`, `raw_content`, and `raw_result`; extraction returns one `content` copy. Use `smart-search fetch URL` for full page content after discovery.
+- Structured results without URLs remain compact provider results, not source/evidence, and are not dropped.
 - Domain-less `anysearch-search` is Vertical Discovery. Explicit domain search requires separate `--domain` and `--sub-domain` values. Dotted shorthand such as `security.cve`, legacy aliases, and incomplete pairs fail locally with migration guidance; there is no compatibility period and search never performs implicit discovery.
 - `--sub-domain-params` accepts one JSON object, nests it unchanged as upstream `sub_domain_params`, and rejects invalid/non-object JSON or reserved keys `query`, `domain`, `sub_domain`, and `max_results` before network access. Output exposes only sorted parameter keys, never values. Validate required/type/enum only from a reliable, versioned Verified Domain Contract; live discovery schemas remain acceptance evidence. Otherwise report `schema_validation.status=unavailable` and pass the request upstream unchanged.
 - `anysearch-batch` accepts at most 5 CLI query strings and returns `error_type=parameter_error` without sending a request when the limit is exceeded.
@@ -133,7 +133,7 @@ Exa domain filters:
 ## Provider Output Details
 
 - Exa HTTP `400` or `422` failures are returned as `ok=false` with `error_type=parameter_error`; use this to distinguish bad CLI/domain/date/category arguments from upstream network failures.
-- AnySearch experimental output should preserve structured results without URLs as raw/structured evidence.
+- AnySearch experimental output should preserve compact structured results without URLs without promoting them to source/evidence.
 - Diagnostic output should report Firecrawl status as whether `FIRECRAWL_API_KEY` is configured; it is not currently a live Firecrawl request.
 
 ## Routing Heuristics

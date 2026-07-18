@@ -33,7 +33,11 @@ from .intent_router import (
     _semantic_summary,
 )
 from .logger import log_info
-from .providers.anysearch import AnySearchProvider, get_verified_domain_manifest
+from .providers.anysearch import (
+    AnySearchProvider,
+    compact_vertical_discovery_output,
+    get_verified_domain_manifest,
+)
 from .providers.context7 import Context7Provider
 from .providers.exa import ExaSearchProvider
 from .providers.jina import JinaReaderProvider
@@ -2091,7 +2095,7 @@ async def _run_vertical_search_fallback(
     for provider in configured:
         start = time.time()
         try:
-            data = await anysearch_search(query, max_results=5)
+            data = compact_vertical_discovery_output(await anysearch_search(query, max_results=5))
             attempt_extra = {
                 "operation": data.get("operation", "vertical_discovery"),
                 "tool": data.get("tool", "search"),
