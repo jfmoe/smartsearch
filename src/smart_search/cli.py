@@ -18,7 +18,6 @@ from .embedding_presets import (
 )
 from .skill_installer import (
     SkillInstallError,
-    install_skill_containers,
     normalize_skill_containers,
     status_skill_containers,
 )
@@ -27,6 +26,7 @@ from .skill_sync import (
     automatic_skill_sync,
     replace_skill_preference,
     skill_preference_lock,
+    synchronize_skill_preference,
 )
 
 
@@ -2557,12 +2557,15 @@ def _run_skills_locked(args: argparse.Namespace, current_version: str) -> int:
             if args.skills_command == "status":
                 data = status_skill_containers(paths)
             elif args.skills_command == "update":
-                preferences = service.config.set_skill_preferences(paths)
-                data = install_skill_containers(paths)
-                if data["ok"]:
-                    preferences = service.config.set_skill_preferences(paths, last_synced_cli_version=current_version)
-                else:
+                data = synchronize_skill_preference(
+                    service.config,
+                    paths,
+                    current_version,
+                    last_synced_cli_version=preferences["last_synced_cli_version"],
+                )
+                if not data["ok"]:
                     data.update(error_type="runtime_error", error="One or more Skill Containers failed to update.")
+                preferences = {"last_synced_cli_version": data["last_synced_cli_version"]}
             else:
                 data = {"ok": False, "error_type": "parameter_error", "error": "Unknown skills command"}
             data.update(

@@ -168,6 +168,32 @@ def test_skills_status_and_update_use_only_saved_paths_and_preserve_extras(tmp_p
     assert final["installations"][0]["hash_match"] is False
 
 
+def test_skills_update_failure_preserves_last_fully_synchronized_version(tmp_path, capsys):
+    container = tmp_path / "blocked"
+    container.mkdir()
+    (container / "smart-search-cli").write_text("not a directory", encoding="utf-8")
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "skills": {
+                    "schema_version": 1,
+                    "paths": [str(container)],
+                    "last_synced_cli_version": "previous-success",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code, result, _ = _run(["skills", "update"], capsys)
+    saved = json.loads(config_file.read_text(encoding="utf-8"))["skills"]
+
+    assert code == cli.EXIT_RUNTIME_ERROR
+    assert result["last_synced_cli_version"] == "previous-success"
+    assert saved["last_synced_cli_version"] == "previous-success"
+
+
 def test_skills_clear_saves_valid_empty_preference_without_deleting_files(tmp_path, capsys):
     container = tmp_path / "saved"
     _run(["skills", "install", str(container)], capsys)

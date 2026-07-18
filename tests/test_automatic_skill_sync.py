@@ -106,6 +106,32 @@ def test_exact_version_match_is_noop(tmp_path, capsys):
     assert not container.exists()
 
 
+def test_empty_preference_disables_automatic_sync_after_version_change(tmp_path, capsys):
+    config_file = tmp_path / "config.json"
+    config_file.write_text(
+        json.dumps(
+            {
+                "XAI_MODEL": "unchanged",
+                "skills": {
+                    "schema_version": 1,
+                    "paths": [],
+                    "last_synced_cli_version": "previous-version",
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    before = config_file.read_bytes()
+
+    code, result, stderr = _run_json(["config", "list"], capsys)
+
+    assert code == cli.EXIT_OK
+    assert result["values"]["XAI_MODEL"] == "unchanged"
+    assert stderr == ""
+    assert config_file.read_bytes() == before
+
+
 def test_background_failure_warns_and_preserves_original_result(tmp_path, capsys):
     container = tmp_path / "blocked"
     container.mkdir()

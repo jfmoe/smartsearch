@@ -23,7 +23,20 @@ def replace_skill_preference(
     config: Config, requested: list[str], current_version: str
 ) -> dict[str, object]:
     paths = normalize_skill_containers(requested)
-    preferences = config.set_skill_preferences(paths)
+    return synchronize_skill_preference(config, paths, current_version, last_synced_cli_version="")
+
+
+def synchronize_skill_preference(
+    config: Config,
+    paths: list[str],
+    current_version: str,
+    *,
+    last_synced_cli_version: str,
+) -> dict[str, object]:
+    preferences = config.set_skill_preferences(
+        paths,
+        last_synced_cli_version=last_synced_cli_version,
+    )
     result = install_skill_containers(paths)
     if result["ok"]:
         preferences = config.set_skill_preferences(paths, last_synced_cli_version=current_version)
@@ -100,6 +113,8 @@ def automatic_skill_sync(config: Config, current_version: str) -> dict[str, obje
                 preferences = config.set_skill_preferences(paths)
             else:
                 paths = normalize_skill_containers(preferences["paths"])
+            if not paths:
+                return {"ok": True, "sync_needed": False, "reason": "disabled"}
             if preferences["last_synced_cli_version"] == current_version:
                 return {"ok": True, "sync_needed": False}
             result = install_skill_containers(paths)
