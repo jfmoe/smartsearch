@@ -394,6 +394,25 @@ Provider timeouts:
 - `ANYSEARCH_TIMEOUT_SECONDS` controls experimental AnySearch JSON-RPC calls and defaults to `30`.
 - Raise it for slower Tavily Hikari / pooled / community endpoints before treating the provider as unhealthy.
 
+## Search Result Journal
+
+The Search Result Journal is an opt-in local diagnostic record of completed Default Search Invocations. It is disabled by default because records contain the full query, answer, source descriptions, and URLs. Enable it deliberately with environment variables or the generic config command; the usual environment → config file → default precedence applies:
+
+```powershell
+smart-search config set SMART_SEARCH_RESULT_JOURNAL_ENABLED true
+smart-search config set SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS 30
+```
+
+`SMART_SEARCH_RESULT_JOURNAL_ENABLED` accepts the existing boolean spellings (`true`, `1`, or `yes`) and defaults to `false`. `SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS` accepts only non-negative integers, defaults to `30`, and uses `0` for permanent retention. The normal interactive setup does not expose this switch.
+
+When enabled, each completed `search` or `s` invocation writes exactly one compact UTF-8 JSON line before rendering. The envelope contains `schema_version`, a UTC `recorded_at`, and the complete normalized terminal result, including primary and extra sources, routing decisions, provider attempts, fallback fields, counts, vertical discovery, timing, and structured failures or CLI timeouts. Provider acceptance commands, `fetch`, `map`, `route`, `doctor`, `deep`, `research`, `diagnose`, and `smoke` are excluded, as are interrupted or crashed processes that never produce a terminal result. Raw provider HTTP responses, request headers, intermediate payloads, and internal tool traces are not recorded.
+
+Before persistence, values under credential-bearing keys and every occurrence of a non-empty configured credential are replaced with `[REDACTED]` in a copy. This does not alter stdout, `--output`, or the in-memory result. Redaction is intentionally limited to authentication credentials: queries, answers, URLs, source descriptions, and ordinary error messages remain complete and may still be sensitive.
+
+Files use the resolved `SMART_SEARCH_LOG_DIR` and the local-date name `search_results_YYYYMMDD.jsonl`; `doctor` reports the enabled state, retention, resolved directory, and writable/ready status without creating a Journal file. Retention cleanup only removes expired regular files in that exact daily namespace. On POSIX-like platforms the directory is user-only and Journal/lock files are readable and writable only by the current user.
+
+Writing is synchronous under a cross-process lock bounded to 0.5 seconds. The lock covers retention bookkeeping and one compact append; the file is flushed and closed without a per-record `fsync`. This adds one small local write to a completed search. With `--output`, the rendered artifact and the independent structured Journal record are intentionally both written. Any Journal failure emits one stderr warning but does not change the search output or exit code.
+
 ## Commands
 
 | Command | Alias | Purpose |

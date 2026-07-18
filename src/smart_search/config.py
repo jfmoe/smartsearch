@@ -87,6 +87,8 @@ class Config:
         "SMART_SEARCH_RETRY_MAX_WAIT",
         "SMART_SEARCH_OUTPUT_CLEANUP",
         "SMART_SEARCH_LOG_TO_FILE",
+        "SMART_SEARCH_RESULT_JOURNAL_ENABLED",
+        "SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS",
         "SSL_VERIFY",
     }
     _LEGACY_CONFIG_KEYS: dict[str, str] = {}
@@ -297,6 +299,8 @@ class Config:
         key = key.strip().upper()
         if key not in self._CONFIG_KEYS:
             raise ValueError(f"Unsupported config key: {key}")
+        if key == "SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS":
+            self._nonnegative_int_value(key, value)
         config_data = self._load_config_file()
         config_data[key] = value
         self._save_config_file(config_data)
@@ -485,6 +489,20 @@ class Config:
         except ValueError as e:
             return float(default), str(e)
 
+    @staticmethod
+    def _nonnegative_int_value(key: str, value: str) -> int:
+        normalized = str(value).strip()
+        if not normalized.isascii() or not normalized.isdigit():
+            raise ValueError(f"Invalid {key}: {value}. Expected a non-negative integer.")
+        return int(normalized)
+
+    def _nonnegative_int_info(self, key: str, default: str) -> tuple[int, str]:
+        value = self._get_config_value(key, default) or default
+        try:
+            return self._nonnegative_int_value(key, value), ""
+        except ValueError as error:
+            return int(default), str(error)
+
     @property
     def validation_level(self) -> str:
         return self._validated_enum(
@@ -624,6 +642,29 @@ class Config:
     @property
     def log_dir_config_value(self) -> str:
         return self._get_config_value("SMART_SEARCH_LOG_DIR", "logs") or "logs"
+
+    @property
+    def result_journal_enabled(self) -> bool:
+        return (self._get_config_value("SMART_SEARCH_RESULT_JOURNAL_ENABLED", "false") or "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+    @property
+    def result_journal_retention_days(self) -> int:
+        value = self._get_config_value("SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS", "30") or "30"
+        return self._nonnegative_int_value("SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS", value)
+
+    @property
+    def configured_credentials(self) -> list[str]:
+        values = {
+            value
+            for key in self._CONFIG_KEYS
+            if any(marker in key for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTHORIZATION"))
+            if (value := self._get_config_value(key))
+        }
+        return sorted(values, key=len, reverse=True)
 
     @staticmethod
     def apply_model_suffix_for_url(model: str, api_url: str) -> str:
@@ -800,6 +841,10 @@ class Config:
             0.0,
             1.0,
         )
+        journal_retention_days, journal_retention_error = self._nonnegative_int_info(
+            "SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS",
+            "30",
+        )
         config_parameter_errors.extend(
             error
             for error in (
@@ -810,6 +855,7 @@ class Config:
                 intent_router_timeout_error,
                 intent_embedding_threshold_error,
                 intent_embedding_margin_error,
+                journal_retention_error,
             )
             if error
         )
@@ -858,6 +904,8 @@ class Config:
             "ANYSEARCH_TIMEOUT_SECONDS": self.anysearch_timeout,
             "SMART_SEARCH_OUTPUT_CLEANUP": self.output_cleanup_enabled,
             "SMART_SEARCH_LOG_TO_FILE": self.log_to_file_enabled,
+            "SMART_SEARCH_RESULT_JOURNAL_ENABLED": self.result_journal_enabled,
+            "SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS": journal_retention_days,
             "SSL_VERIFY": self.ssl_verify_enabled,
             "EXA_API_KEY": self._mask_api_key(self.exa_api_key) if self.exa_api_key else "未配置",
             "EXA_BASE_URL": self.exa_base_url,
@@ -897,9 +945,15 @@ class Config:
             "log_dir_config_value": self.log_dir_config_value,
             "resolved_log_dir": str(self.log_dir),
             "file_logging_enabled": self.debug_enabled or self.log_to_file_enabled,
+            "result_journal": self._result_journal_status(),
             "config_sources": self.get_config_sources(),
             "config_parameter_errors": config_parameter_errors,
             "config_status": config_status
         }
+
+    def _result_journal_status(self) -> dict:
+        from .result_journal import SearchResultJournal
+
+        return SearchResultJournal(self).status()
 
 config = Config()

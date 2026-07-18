@@ -446,6 +446,25 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 | `SMART_SEARCH_RESEARCH_PREFERRED_PROVIDERS` | `research` 路由优先 provider CSV，只能在同 capability 内调整顺序 |
 | `SMART_SEARCH_RESEARCH_DISABLED_PROVIDERS` | `research` 禁用 provider CSV，不能改变 provider capability 边界 |
 | `SMART_SEARCH_CONFIG_DIR` | 指定本机配置和日志根目录 |
+| `SMART_SEARCH_RESULT_JOURNAL_ENABLED` | 是否启用 Search Result Journal；接受 `true/1/yes`，默认 `false` |
+| `SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS` | Journal 保留天数；只接受非负整数，默认 `30`，`0` 表示永久保留 |
+
+## Search Result Journal
+
+Search Result Journal 是已完成 Default Search Invocation 的可选本地诊断记录。它默认关闭，因为记录包含完整 query、answer、来源描述和 URL。需要通过环境变量或 generic config 命令明确启用，优先级仍是“环境变量 → 配置文件 → 默认值”；普通交互式 setup 不提供这个开关：
+
+```powershell
+smart-search config set SMART_SEARCH_RESULT_JOURNAL_ENABLED true
+smart-search config set SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS 30
+```
+
+启用后，每个到达终态的 `search` 或 `s` 在渲染前恰好写入一条紧凑 UTF-8 JSONL。envelope 包含 `schema_version`、UTC `recorded_at` 和完整规范化终态 result，因此保留 primary/extra/all sources、路由决策、provider attempts、fallback、counts、Vertical Discovery、timing，以及结构化失败或 CLI timeout。Provider Acceptance Operation、`fetch`、`map`、`route`、`doctor`、`deep`、`research`、`diagnose`、`smoke` 不记录；Ctrl-C、SIGKILL、解释器或主机崩溃等未产生终态 result 的调用也不保证有记录。raw provider HTTP response、request headers、中间 payload 和 internal tool traces 不进入 Journal。
+
+落盘前会在副本上递归把认证字段的值，以及字符串中出现的所有非空已配置 credential 替换为 `[REDACTED]`，不会改变内存结果、stdout 或 `--output`。脱敏边界只覆盖认证凭据；query、answer、URL、来源描述和普通 error 会完整保留，因此 Journal 仍应视为本机敏感数据。
+
+Journal 使用解析后的 `SMART_SEARCH_LOG_DIR`，按本地日期写入 `search_results_YYYYMMDD.jsonl`。`doctor` 会报告 enabled、retention、resolved directory 和 writable/ready，且不会因此创建 Journal 文件。清理只删除严格匹配该日文件命名空间的过期普通文件；在 POSIX-like 平台上，目录只允许当前用户访问，Journal 和 lock 文件只允许当前用户读写。
+
+每次写入同步执行，跨进程锁等待上限为 0.5 秒；锁只覆盖 retention bookkeeping 和一次紧凑 append，正常 flush/close，但不逐条 `fsync`。因此完成搜索时会多一次很短的本地写入。使用 `--output` 时，显式 rendered artifact 和独立 structured Journal 会按预期双写。任何 Journal 故障只在 stderr 产生一次 warning，不改变搜索输出或退出码。
 
 ## 常用命令
 

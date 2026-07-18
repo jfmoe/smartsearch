@@ -28,6 +28,7 @@ from .skill_sync import (
     skill_preference_lock,
     synchronize_skill_preference,
 )
+from .result_journal import SearchResultJournal
 
 
 EXIT_OK = 0
@@ -210,6 +211,27 @@ def _search_timeout_result(query: str, timeout: float, search_kwargs: dict[str, 
     }
 
 
+def _search_config_error_result(query: str, error: ValueError) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error_type": "config_error",
+        "error": str(error),
+        "query": query,
+        "content": "",
+        "sources": [],
+        "sources_count": 0,
+        "primary_sources": [],
+        "primary_sources_count": 0,
+        "extra_sources": [],
+        "extra_sources_count": 0,
+        "source_warning": "",
+        "routing_decision": {},
+        "providers_used": [],
+        "provider_attempts": [],
+        "fallback_used": False,
+    }
+
+
 def _one_line(value: Any, limit: int = 160) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.replace("\r", " ").replace("\n", " ").split())
@@ -387,6 +409,7 @@ def _format_result_markdown(command: str, data: dict[str, Any], title: str) -> s
 
 
 def _format_doctor_markdown(data: dict[str, Any]) -> str:
+    journal = data.get("result_journal") or {}
     lines = [
         "# Smart Search Doctor",
         "",
@@ -400,6 +423,11 @@ def _format_doctor_markdown(data: dict[str, Any]) -> str:
         f"Log dir config value: `{data.get('log_dir_config_value', data.get('SMART_SEARCH_LOG_DIR', ''))}`",
         f"Resolved log dir: `{data.get('resolved_log_dir', '')}`",
         f"File logging enabled: {_yes_no(data.get('file_logging_enabled'))}",
+        f"Search Result Journal enabled: {_yes_no(journal.get('enabled'))}",
+        f"Search Result Journal retention: {journal.get('retention_days', '')} days",
+        f"Search Result Journal directory: `{journal.get('resolved_directory', '')}`",
+        f"Search Result Journal writable: {_yes_no(journal.get('writable'))}",
+        f"Search Result Journal ready: {_yes_no(journal.get('ready'))}",
     ]
     if data.get("legacy_windows_config_file"):
         lines.append(f"Legacy Windows config file: `{data.get('legacy_windows_config_file')}`")
@@ -1292,6 +1320,13 @@ def _print_result(command: str, data: dict[str, Any], fmt: str, output: str = ""
     if rendered and not rendered.endswith("\n"):
         _write_stdout("\n")
     return _exit_code(data)
+
+
+def _journal_and_print(data: dict[str, Any], fmt: str, output: str) -> int:
+    outcome = SearchResultJournal(service.config).write(data)
+    if outcome.warning:
+        _write_stderr(f"Search Result Journal warning: {outcome.warning}\n")
+    return _print_result("search", data, fmt, output)
 
 
 def _add_format_args(parser: argparse.ArgumentParser) -> None:
@@ -2368,6 +2403,10 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
 
 async def _run_async(args: argparse.Namespace) -> int:
     if args.command == "search":
+        try:
+            _ = service.config.result_journal_retention_days
+        except ValueError as error:
+            return _journal_and_print(_search_config_error_result(args.query, error), args.format, args.output)
         search_kwargs = {
             "platform": args.platform,
             "model": args.model,
@@ -2387,8 +2426,7 @@ async def _run_async(args: argparse.Namespace) -> int:
             )
         except asyncio.TimeoutError:
             data = _search_timeout_result(args.query, args.timeout, search_kwargs)
-            return _print_result("search", data, args.format, args.output)
-        return _print_result("search", data, args.format, args.output)
+        return _journal_and_print(data, args.format, args.output)
     if args.command == "route":
         data = await service.route(args.query, validation=args.validation, mode=args.router_mode)
         return _print_result("route", data, args.format, args.output)

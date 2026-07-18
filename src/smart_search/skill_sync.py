@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
 from .config import Config
+from .file_lock import bounded_file_lock
 from .skill_installer import (
     SkillInstallError,
     install_skill_containers,
@@ -48,58 +47,12 @@ def synchronize_skill_preference(
     }
 
 
-def _try_lock(lock_file) -> bool:
-    if os.name == "nt":
-        import msvcrt
-
-        lock_file.seek(0)
-        if lock_file.read(1) == b"":
-            lock_file.write(b"\0")
-            lock_file.flush()
-        lock_file.seek(0)
-        try:
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
-            return True
-        except OSError:
-            return False
-
-    import fcntl
-
-    try:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except BlockingIOError:
-        return False
-
-
-def _unlock(lock_file) -> None:
-    if os.name == "nt":
-        import msvcrt
-
-        lock_file.seek(0)
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        return
-
-    import fcntl
-
-    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-
 @contextmanager
 def skill_preference_lock(config: Config, timeout: float) -> Iterator[bool]:
     lock_path = Path(f"{config.config_file}.skills.lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+b") as lock_file:
-        deadline = time.monotonic() + timeout
-        acquired = _try_lock(lock_file)
-        while not acquired and time.monotonic() < deadline:
-            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-            acquired = _try_lock(lock_file)
-        try:
-            yield acquired
-        finally:
-            if acquired:
-                _unlock(lock_file)
+    with bounded_file_lock(lock_path, timeout) as acquired:
+        yield acquired
 
 
 def _load_automatic_sync_state(config: Config) -> tuple[dict | None, list[str]]:
