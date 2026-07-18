@@ -104,6 +104,7 @@ def test_exact_version_match_is_noop(tmp_path, capsys):
     assert stderr == ""
     assert config_file.read_bytes() == before
     assert not container.exists()
+    assert not Path(f"{config_file}.skills.lock").exists()
 
 
 def test_empty_preference_disables_automatic_sync_after_version_change(tmp_path, capsys):
@@ -130,6 +131,7 @@ def test_empty_preference_disables_automatic_sync_after_version_change(tmp_path,
     assert result["values"]["XAI_MODEL"] == "unchanged"
     assert stderr == ""
     assert config_file.read_bytes() == before
+    assert not Path(f"{config_file}.skills.lock").exists()
 
 
 def test_background_failure_warns_and_preserves_original_result(tmp_path, capsys):

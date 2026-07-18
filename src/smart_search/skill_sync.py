@@ -102,21 +102,44 @@ def skill_preference_lock(config: Config, timeout: float) -> Iterator[bool]:
                 _unlock(lock_file)
 
 
+def _load_automatic_sync_state(config: Config) -> tuple[dict | None, list[str]]:
+    preferences = config.get_skill_preferences()
+    if preferences is None:
+        return None, []
+    return preferences, normalize_skill_containers(preferences["paths"])
+
+
+def _automatic_sync_noop_reason(
+    preferences: dict | None,
+    paths: list[str],
+    current_version: str,
+) -> str | None:
+    if preferences is None:
+        return None
+    if not paths:
+        return "disabled"
+    if preferences["last_synced_cli_version"] == current_version:
+        return "current"
+    return None
+
+
 def automatic_skill_sync(config: Config, current_version: str) -> dict[str, object]:
     try:
+        preferences, paths = _load_automatic_sync_state(config)
+        noop_reason = _automatic_sync_noop_reason(preferences, paths, current_version)
+        if noop_reason is not None:
+            return {"ok": True, "sync_needed": False, "reason": noop_reason}
+
         with skill_preference_lock(config, BACKGROUND_LOCK_TIMEOUT_SECONDS) as acquired:
             if not acquired:
                 return {"ok": False, "reason": "lock_timeout"}
-            preferences = config.get_skill_preferences()
+            preferences, paths = _load_automatic_sync_state(config)
             if preferences is None:
                 paths = normalize_skill_containers(["agents"])
                 preferences = config.set_skill_preferences(paths)
-            else:
-                paths = normalize_skill_containers(preferences["paths"])
-            if not paths:
-                return {"ok": True, "sync_needed": False, "reason": "disabled"}
-            if preferences["last_synced_cli_version"] == current_version:
-                return {"ok": True, "sync_needed": False}
+            noop_reason = _automatic_sync_noop_reason(preferences, paths, current_version)
+            if noop_reason is not None:
+                return {"ok": True, "sync_needed": False, "reason": noop_reason}
             result = install_skill_containers(paths)
             if result["ok"]:
                 status = status_skill_containers(paths)
