@@ -18,6 +18,7 @@
     "npm/",
     "skills/smart-search-cli/**",
     "src/smart_search/**/*.py",
+    "src/smart_search/assets/anysearch/*.json",
     "src/smart_search/assets/skills/smart-search-cli/**",
     "pyproject.toml",
     "README.md",

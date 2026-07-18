@@ -31,6 +31,7 @@ function treeFiles(relativeRoot) {
 const publicSkillFiles = treeFiles("skills/smart-search-cli");
 const packagedSkillFiles = treeFiles("src/smart_search/assets/skills/smart-search-cli");
 const packagedRuntimeFiles = treeFiles("src/smart_search").filter((file) => file.endsWith(".py"));
+const anySearchManifest = "src/smart_search/assets/anysearch/verified-domain-manifest.json";
 const requiredFiles = [
   "package.json",
   "pyproject.toml",
@@ -42,6 +43,7 @@ const requiredFiles = [
   "npm/scripts/verify-release-metadata.js",
   "npm/scripts/verify-release-policy.js",
   "npm/scripts/verify-pack.js",
+  anySearchManifest,
   ...publicSkillFiles,
   ...packagedSkillFiles,
   ...packagedRuntimeFiles
