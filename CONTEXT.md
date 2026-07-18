@@ -83,3 +83,11 @@ _Avoid_: domain catalog、live discovery result、supported-by-default list
 **Automatic Domain Search**:
 路由器从自然语言中选择具体垂直子域并构造其 Sub-domain Parameters 的搜索过程；它不同于无域的 Vertical Discovery 和用户指定目标的显式域级搜索。
 _Avoid_: vertical discovery、explicit vertical search、vertical intent routing
+
+**Default Search Invocation**:
+一次通过 Smart Search 默认聚合搜索入口发起并到达终态的请求，无论结果成功、失败或超时；供应方验收、抓取、诊断及其他专用操作不属于该概念。
+_Avoid_: successful search、provider search、all commands
+
+**Search Result Journal**:
+启用后按发生顺序保存每次 Default Search Invocation 终态业务结果的本地记录集合；查询、回答和来源属于完整结果，认证凭据不属于可持久化内容。它用于复盘与诊断，不是调试消息流，也不作为搜索响应缓存。
+_Avoid_: debug log、response cache、search history
