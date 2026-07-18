@@ -609,9 +609,9 @@ npm test
 npm pack --dry-run
 ```
 
-## 0.4.0 发行线
+## 0.5.0 发行线
 
-`@jfmoe/smart-search@0.4.0` 是个人发行线。Node 是唯一承诺的 JavaScript
+`@jfmoe/smart-search@0.5.0` 是个人发行线。Node 是唯一承诺的 JavaScript
 启动入口，macOS 是唯一正式支持的平台。公共 Skill 只在
 `skills/smart-search-cli` 中维护，包内镜像由 `scripts/sync-skill.py` 生成。
 
