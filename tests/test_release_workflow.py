@@ -84,7 +84,7 @@ def test_release_identity_and_versions_are_consistent() -> None:
     pyproject = PYPROJECT.read_text(encoding="utf-8")
 
     assert package["name"] == "@jfmoe/smart-search"
-    assert package["version"] == "0.3.0"
+    assert package["version"] == "0.4.0"
     assert package["homepage"] == "https://github.com/jfmoe/smartsearch#readme"
     assert package["repository"]["url"] == "git+https://github.com/jfmoe/smartsearch.git"
     assert package["bugs"]["url"] == "https://github.com/jfmoe/smartsearch/issues"
@@ -92,7 +92,7 @@ def test_release_identity_and_versions_are_consistent() -> None:
     assert lock["version"] == package["version"]
     assert lock["packages"][""]["name"] == package["name"]
     assert lock["packages"][""]["version"] == package["version"]
-    assert re.search(r'^version = "0\.3\.0"$', pyproject, flags=re.MULTILINE)
+    assert re.search(r'^version = "0\.4\.0"$', pyproject, flags=re.MULTILINE)
     assert 'Homepage = "https://github.com/jfmoe/smartsearch#readme"' in pyproject
     assert run_node(METADATA_CHECK).returncode == 0
 
