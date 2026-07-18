@@ -2,7 +2,6 @@ import json
 import asyncio
 from pathlib import Path
 from smart_search import cli
-from smart_search import skill_installer
 
 
 class GbkStdout:
@@ -72,8 +71,10 @@ def test_each_subcommand_help_exits_successfully(capsys):
         ["diagnose", "--help"],
         ["diagnose", "openai-compatible", "--help"],
         ["skills", "--help"],
+        ["skills", "install", "--help"],
         ["skills", "status", "--help"],
         ["skills", "update", "--help"],
+        ["skills", "clear", "--help"],
         ["setup", "--help"],
         ["config", "--help"],
         ["config", "path", "--help"],
@@ -161,8 +162,10 @@ def test_command_aliases_parse_to_canonical_commands():
         assert parser.parse_args(argv).model_command == model_command
 
     skills_cases = [
+        (["skills", "install"], "install"),
         (["skills", "st"], "status"),
         (["skills", "up"], "update"),
+        (["skills", "clear"], "clear"),
     ]
     for argv, skills_command in skills_cases:
         assert parser.parse_args(argv).skills_command == skills_command
@@ -1288,7 +1291,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
         ("smoke", ["smoke", "--format", "markdown"]),
         ("doctor", ["doctor", "--format", "markdown"]),
         ("diagnose", ["diagnose", "openai-compatible", "--format", "markdown"]),
-        ("skills-status", ["skills", "status", "--targets", "codex", "--format", "markdown"]),
+        ("skills-clear", ["skills", "clear", "--format", "markdown"]),
         ("config-path", ["config", "path", "--format", "markdown"]),
         ("config-list", ["config", "list", "--format", "markdown"]),
         ("config-set", ["config", "set", "XAI_MODEL", "grok", "--format", "markdown"]),
@@ -1319,7 +1322,7 @@ def test_all_formatted_commands_have_non_json_markdown(monkeypatch):
             "smoke": {"ok": True, "mode": "mock", "failed_cases": [], "cases": [{"name": "case", "ok": True}]},
             "doctor": {"ok": True, "config_status": "ok", "minimum_profile_ok": True},
             "diagnose": {"ok": True, "provider": "openai-compatible", "summary": "ok", "recommendation": "none"},
-            "skills": {"ok": True, "targets": [{"target": "codex", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
+            "skills": {"ok": True, "installations": [{"container": "C:/skills", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
             "config": {"ok": True, "config_file": "C:/tmp/config.json", "values": {"XAI_MODEL": "grok"}},
             "model": {"ok": True, "xai_model": "grok"},
         }[command]
@@ -1335,7 +1338,7 @@ def test_non_content_commands_have_non_empty_content_fallback():
         "smoke": {"ok": True, "mode": "mock", "cases": [], "failed_cases": []},
         "config": {"ok": True, "config_file": "C:/tmp/config.json"},
         "model": {"ok": True, "xai_model": "grok"},
-        "skills": {"ok": True, "targets": [{"target": "codex", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
+        "skills": {"ok": True, "installations": [{"container": "C:/skills", "status": "up_to_date"}], "status_counts": {"up_to_date": 1}},
         "exa-search": {"ok": True, "results": [{"title": "Example", "url": "https://example.com"}]},
         "anysearch-search": {"ok": True, "provider": "anysearch", "results": [{"title": "AnySearch", "url": ""}]},
         "route-calibrate": {"ok": True, "primary_metric": "semantic_macro_f1", "dataset_size": 100, "model_results": [], "recommended_model": ""},
@@ -1344,74 +1347,6 @@ def test_non_content_commands_have_non_empty_content_fallback():
         rendered = cli._render(command, data, "content")
         assert rendered.strip(), command
         assert not rendered.lstrip().startswith("{"), command
-
-
-def test_skills_status_reports_missing_and_update_writes_target(tmp_path, capsys):
-    status_code = cli.main(["skills", "status", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
-    status = json.loads(capsys.readouterr().out)
-
-    assert status_code == cli.EXIT_OK
-    assert status["selected"] == ["codex"]
-    assert status["targets"][0]["status"] == "missing"
-    assert status["targets"][0]["hash_match"] is False
-
-    update_code = cli.main(["skills", "update", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
-    update = json.loads(capsys.readouterr().out)
-
-    assert update_code == cli.EXIT_OK
-    assert update["installed_count"] == 1
-    assert (tmp_path / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-
-    status_code = cli.main(["skills", "status", "--targets", "codex", "--skills-root", str(tmp_path), "--format", "json"])
-    status = json.loads(capsys.readouterr().out)
-
-    assert status_code == cli.EXIT_OK
-    assert status["targets"][0]["status"] == "up_to_date"
-    assert status["targets"][0]["hash_match"] is True
-
-
-def test_skills_update_preserves_user_files(tmp_path, capsys):
-    installed_skill = (
-        tmp_path / ".codex" / "skills" / "smart-search-cli"
-    )
-    installed_skill.mkdir(parents=True)
-    user_file = installed_skill / "MY-NOTES.md"
-    user_file.write_text("keep me\n", encoding="utf-8")
-
-    code = cli.main([
-        "skills",
-        "update",
-        "--targets",
-        "codex",
-        "--skills-root",
-        str(tmp_path),
-        "--format",
-        "json",
-    ])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_OK
-    assert data["installed_count"] == 1
-    assert user_file.read_text(encoding="utf-8") == "keep me\n"
-
-
-def test_skills_update_all_selects_every_target(tmp_path, capsys):
-    code = cli.main(["skills", "update", "--all", "--skills-root", str(tmp_path), "--format", "json"])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_OK
-    assert data["installed_count"] == len(skill_installer.SKILL_TARGETS)
-    assert set(data["selected"]) == {target.target_id for target in skill_installer.SKILL_TARGETS}
-
-
-def test_skills_unknown_target_returns_parameter_error(tmp_path, capsys):
-    code = cli.main(["skills", "status", "--targets", "unknown", "--skills-root", str(tmp_path), "--format", "json"])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_PARAMETER_ERROR
-    assert data["error_type"] == "parameter_error"
-    assert "Unknown skill target" in data["error"]
-    assert not (tmp_path / ".codex" / "skills" / "smart-search-cli").exists()
 
 
 def test_setup_non_interactive_saves_values(monkeypatch, capsys):
@@ -1749,120 +1684,6 @@ def test_setup_non_interactive_rejects_legacy_flags(capsys):
         capsys.readouterr()
 
 
-def test_setup_non_interactive_installs_selected_skills_under_user_root_override(monkeypatch, tmp_path, capsys):
-    saved = {}
-
-    monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "key": key, "value": "***"})
-    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
-
-    code = cli.main([
-        "setup",
-        "--non-interactive",
-        "--install-skills",
-        "codex,claude,cursor",
-        "--skills-root",
-        str(tmp_path),
-    ])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_OK
-    assert saved == {}
-    assert data["skills"]["installed_count"] == 3
-    assert (tmp_path / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert (tmp_path / ".claude" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert (tmp_path / ".cursor" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-
-
-def test_setup_non_interactive_installs_skill_under_home_by_default(monkeypatch, tmp_path, capsys):
-    fake_home = tmp_path / "home"
-
-    monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "key": key, "value": "***"})
-    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
-    monkeypatch.setattr(skill_installer.Path, "home", lambda: fake_home)
-
-    code = cli.main([
-        "setup",
-        "--non-interactive",
-        "--install-skills",
-        "codex,hermes-agent",
-    ])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_OK
-    assert data["skills"]["installed_count"] == 2
-    assert {item["target"] for item in data["skills"]["installed"]} == {"codex", "hermes"}
-    assert (fake_home / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert (fake_home / ".hermes" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert not (tmp_path / "project" / ".codex" / "skills" / "smart-search-cli").exists()
-    assert not (tmp_path / "project" / ".hermes" / "skills" / "smart-search-cli").exists()
-
-
-def test_setup_skip_skills_writes_no_skill_files(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "key": key, "value": "***"})
-    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
-
-    code = cli.main([
-        "setup",
-        "--non-interactive",
-        "--skip-skills",
-        "--install-skills",
-        "codex",
-        "--skills-root",
-        str(tmp_path),
-    ])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_OK
-    assert "skills" not in data
-    assert not (tmp_path / ".codex" / "skills" / "smart-search-cli").exists()
-
-
-def test_setup_unknown_skill_target_returns_parameter_error(monkeypatch, capsys):
-    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
-
-    code = cli.main(["setup", "--non-interactive", "--install-skills", "unknown"])
-    data = json.loads(capsys.readouterr().out)
-
-    assert code == cli.EXIT_PARAMETER_ERROR
-    assert data["error_type"] == "parameter_error"
-    assert "Unknown skill target" in data["error"]
-
-
-def test_setup_guided_installs_tui_selected_skill_targets(monkeypatch, tmp_path, capsys):
-    saved = {}
-    answers = iter(["n", "n"])
-    checkbox_calls = []
-
-    def fake_checkbox(message, choices):
-        checkbox_calls.append((message, choices))
-        if "AI tools" in message:
-            return ["codex", "cursor"]
-        return []
-
-    monkeypatch.setattr(cli, "_checkbox_with_tui", fake_checkbox)
-    monkeypatch.setattr(cli.service, "config_set", lambda key, value: {"ok": True, "key": key, "value": "***"})
-    monkeypatch.setattr(cli.service, "config_path", lambda: {"ok": True, "config_file": "C:/tmp/config.json"})
-    monkeypatch.setattr(cli.service, "config_list", lambda show_secrets=False: {"ok": True, "values": saved.copy()})
-    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
-
-    code = cli.main(["setup", "--lang", "en", "--skills-root", str(tmp_path)])
-    captured = capsys.readouterr()
-    data = json.loads(captured.out)
-
-    assert code == cli.EXIT_OK
-    assert data["skills"]["installed_count"] == 2
-    assert (tmp_path / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert (tmp_path / ".cursor" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    skill_choices = next(choices for message, choices in checkbox_calls if "AI tools" in message)
-    skill_choice_names = [choice["name"] for choice in skill_choices]
-    assert "Codex (~/.codex/skills)" in skill_choice_names
-    assert "Cursor (~/.cursor/skills)" in skill_choice_names
-    assert not any("project/" in name for name in skill_choice_names)
-    assert "Install the smart-search-cli skill" in captured.err
-    assert "user-level AI tools" in captured.err
-    assert "Skill install result" in captured.err
-
-
 def test_setup_banner_falls_back_when_pyfiglet_unavailable(monkeypatch, capsys):
     real_import = __import__
 
@@ -1878,69 +1699,6 @@ def test_setup_banner_falls_back_when_pyfiglet_unavailable(monkeypatch, capsys):
 
     assert "Smart Search" in captured.err
     assert "CLI-first multi-source search" in captured.err
-
-
-def test_skill_installer_parse_aliases_and_all(tmp_path):
-    assert skill_installer.parse_skill_targets("claude-code,github-copilot,agentskills,hermes-agent") == [
-        "claude",
-        "copilot",
-        "codex",
-        "hermes",
-    ]
-    assert len(skill_installer.parse_skill_targets("all")) == len(skill_installer.SKILL_TARGETS)
-
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "SKILL.md").write_text("---\nname: smart-search-cli\n---\n", encoding="utf-8")
-    result = skill_installer.install_skill_targets(
-        ["codex"],
-        project_root=tmp_path / "project",
-        source_root=source,
-    )
-
-    assert result["ok"] is True
-    assert result["installed_count"] == 1
-    assert (tmp_path / "project" / ".codex" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-
-
-def test_skill_installer_pi_target_uses_agent_skill_root(tmp_path):
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "SKILL.md").write_text("---\nname: smart-search-cli\n---\n", encoding="utf-8")
-
-    result = skill_installer.install_skill_targets(
-        ["pi"],
-        project_root=tmp_path / "project",
-        source_root=source,
-    )
-
-    assert result["ok"] is True
-    assert result["installed_count"] == 1
-    assert Path(result["installed"][0]["path"]).as_posix().endswith(".pi/agent/skills/smart-search-cli")
-    assert (tmp_path / "project" / ".pi" / "agent" / "skills" / "smart-search-cli" / "SKILL.md").is_file()
-    assert not (tmp_path / "project" / ".pi" / "skills" / "smart-search-cli").exists()
-
-
-def test_skill_installer_status_detects_stale_and_extra_files(tmp_path):
-    source = tmp_path / "source"
-    source.mkdir()
-    (source / "SKILL.md").write_text("new", encoding="utf-8")
-    root = tmp_path / "project"
-    dest = root / ".codex" / "skills" / "smart-search-cli"
-    dest.mkdir(parents=True)
-
-    (dest / "SKILL.md").write_text("old", encoding="utf-8")
-    stale = skill_installer.status_skill_targets(["codex"], project_root=root, source_root=source)
-    assert stale["targets"][0]["status"] == "stale"
-    assert stale["targets"][0]["stale_files"] == ["SKILL.md"]
-
-    (dest / "SKILL.md").write_text("new", encoding="utf-8")
-    (dest / "OLD.md").write_text("old leftover", encoding="utf-8")
-    extra = skill_installer.status_skill_targets(["codex"], project_root=root, source_root=source)
-    assert extra["targets"][0]["status"] == "extra_files"
-    assert extra["targets"][0]["extra_files"] == ["OLD.md"]
-    assert extra["targets"][0]["managed_hash_match"] is True
-    assert extra["targets"][0]["hash_match"] is False
 
 
 def test_tavily_url_normalization_cases():

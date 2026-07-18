@@ -117,26 +117,28 @@ smart-search deep "Deep research recent Bitcoin market movement" --budget standa
 smart-search research "Deep research recent Bitcoin market movement" --budget deep --format markdown
 ```
 
-8. Install the skill for AI tools when setup prompts you, or explicitly:
+8. Install the Skill and save its complete set of Skill Containers:
 
 ```powershell
-smart-search setup --non-interactive --install-skills codex,claude,cursor,hermes
+smart-search skills install
+smart-search skills install agents claude hermes "C:\Users\me\.other-tool\skills"
 ```
 
-Skill installation writes the bundled `smart-search-cli` skill into user-level tool directories such as
-`~/.codex/skills`, `~/.claude/skills`, `~/.cursor/skills`, and `~/.hermes/skills`. It does not initialize
-Trellis, hooks, agents, or commands. `--skills-root PATH` is only an advanced override for portable or test installs.
+With no arguments, installation selects only the Agents Skill Target (`~/.agents/skills`). The only built-in names are
+`agents`, `claude`, and `hermes`; every other positional argument is a custom Skill Container. Smart Search appends the
+`smart-search-cli` child directory, saves normalized container paths in `config.json`, and leaves provider configuration intact.
 
 9. After upgrading the CLI, refresh the installed global skill:
 
 ```powershell
-smart-search skills status --targets codex --format json
-smart-search skills update --targets codex --format json
+smart-search skills status --format json
+smart-search skills update --format json
+smart-search skills clear --format json
 ```
 
-`setup --install-skills` remains available for first-time setup. For routine synchronization after package updates, use
-`skills status` and `skills update`; they only inspect or overwrite the managed `smart-search-cli` files and do not change
-provider keys or create Trellis/hooks/agents/commands.
+`skills status` and `skills update` operate only on the saved Skill Installation Preference. `skills clear` disables future
+management by saving an empty path set without uninstalling files. Updates overwrite bundled managed files but preserve
+user-added and obsolete extra files. Provider setup never changes Skill preferences.
 
 ## Current Architecture
 
@@ -396,6 +398,7 @@ Provider timeouts:
 | `doctor` | `d` | Masked config and connectivity check |
 | `diagnose` | `diag` | Focused OpenAI-compatible troubleshooting report |
 | `setup` | `init` | Interactive or scripted setup |
+| `skills` | `skill` | Install, inspect, update, or clear saved Skill Containers |
 | `config` | `cfg` | Local config read/write |
 | `model` | `mdl` | Show explicit provider model settings; use `config set XAI_MODEL` or `OPENAI_COMPATIBLE_MODEL` to change them |
 | `smoke` | `sm` | Provider routing smoke tests |

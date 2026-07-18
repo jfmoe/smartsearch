@@ -110,26 +110,28 @@ smart-search deep "深度搜索一下最近的比特币行情" --budget standard
 smart-search research "深度搜索一下最近的比特币行情" --budget deep --format markdown
 ```
 
-7. 把 skill 安装给 AI 工具：
+7. 安装 Skill 并保存完整的 Skill Container 集合：
 
 ```powershell
-smart-search setup --non-interactive --install-skills codex,claude,cursor,hermes
+smart-search skills install
+smart-search skills install agents claude hermes "D:\AI Tools\skills"
 ```
 
-Skill 安装会把内置 `smart-search-cli` 写入用户级工具目录，例如 `~/.codex/skills`、
-`~/.claude/skills`、`~/.cursor/skills`、`~/.hermes/skills`。它不会初始化 Trellis、hooks、
-agents 或 commands。`--skills-root PATH` 只适合便携安装或测试时高级覆盖根目录。
+无参数时只选择 Agents Skill Target（`~/.agents/skills`）。内置名严格只有 `agents`、`claude`、
+`hermes`；其他 positional 参数都是自定义 Skill Container。Smart Search 会追加 `smart-search-cli`
+子目录，将规范化的容器路径保存到 `config.json`，并保留现有 provider 配置。
 
 8. 升级 CLI 后，同步已经安装到全局 AI 工具里的 skill：
 
 ```powershell
-smart-search skills status --targets codex --format json
-smart-search skills update --targets codex --format json
+smart-search skills status --format json
+smart-search skills update --format json
+smart-search skills clear --format json
 ```
 
-`setup --install-skills` 仍然保留给第一次配置使用。平时升级包以后，优先用 `skills status` 和
-`skills update`；它们只检查或覆盖 `smart-search-cli` 托管文件，不会改 provider key，也不会创建
-Trellis、hooks、agents 或 commands。
+`skills status` 和 `skills update` 只操作已保存的 Skill Installation Preference。`skills clear`
+通过保存空路径集合停止后续管理，但不卸载文件。更新会覆盖内置托管文件，但保留用户添加和已废弃的额外文件。
+provider setup 不会改变 Skill 偏好。
 
 ## 当前架构
 
@@ -447,6 +449,7 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 | `route-calibrate` | `route-cal`、`rcal` | 评测 embedding 路由模型并推荐 threshold/margin |
 | `doctor` | `d` | 配置和连通性检查 |
 | `setup` | `init` | 配置向导 |
+| `skills` | `skill` | 安装、检查、更新或清空已保存的 Skill Container |
 | `config` | `cfg` | 本机配置读写 |
 | `model` | `mdl` | 查看显式 provider 模型；修改请用 `config set XAI_MODEL` 或 `OPENAI_COMPATIBLE_MODEL` |
 | `smoke` | `sm` | provider 路由冒烟测试 |

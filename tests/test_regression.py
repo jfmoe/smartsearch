@@ -147,11 +147,13 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
         "research provider advantage routing",
         "`research --fallback auto` permits same-capability fallback",
         "Live-limited coverage should run `doctor`, one broad `search`, one `exa-search`, and one `fetch`",
-        "`smart-search skills status --targets codex,claude,cursor,hermes --format json`",
-        "`smart-search skills update --targets codex,claude,cursor,hermes --format json`",
+        "`smart-search skills install [TARGET_OR_PATH ...]`",
+        "`smart-search skills status --format json`",
+        "`smart-search skills update --format json`",
+        "`smart-search skills clear --format json`",
         "Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and",
-        "must not change provider keys, run setup",
-        "Prefer `skills status` and",
+        "Provider setup never changes Skill preferences",
+        "overwrites current bundled managed files",
         "rerun the affected smoke until it passes or is proven to be an external provider blocker",
         "Budget limits must not break evidence policy",
         "Even `--budget quick` plans must retain at least one `fetch` step",
@@ -172,6 +174,9 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
     for marker in required_markers:
         assert marker in public_contract
         assert marker in packaged_contract
+    for removed_marker in ("--targets", "--skills-root", "--install-skills"):
+        assert removed_marker not in public_contract
+        assert removed_marker not in packaged_contract
 
 
 def test_search_timeout_retry_policy_is_distributable():

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 class Config:
+    _SKILLS_SCHEMA_VERSION = 1
     _instance = None
     _SETUP_COMMAND = (
         "Run `smart-search setup`, or configure XAI_API_KEY and/or "
@@ -187,6 +188,42 @@ class Config:
         except (IOError, PermissionError, OSError) as e:
             hint = " (sandbox/CI 下可设 SMART_SEARCH_CONFIG_DIR 指向可写目录)" if isinstance(e, PermissionError) else ""
             raise ValueError(f"无法保存配置文件: {str(e)}{hint}")
+
+    def get_skill_preferences(self) -> dict | None:
+        data = self._load_config_file()
+        if "skills" not in data:
+            return None
+        skills = data["skills"]
+        if not isinstance(skills, dict):
+            raise ValueError("Invalid skills configuration: expected an object. Run `smart-search skills install`.")
+        schema_version = skills.get("schema_version")
+        if type(schema_version) is not int or schema_version != self._SKILLS_SCHEMA_VERSION:
+            raise ValueError(
+                f"Unsupported skills schema version: {schema_version!r}. "
+                "Run `smart-search skills install` to replace it."
+            )
+        paths = skills.get("paths")
+        last_synced = skills.get("last_synced_cli_version")
+        if not isinstance(paths, list) or not all(isinstance(path, str) and path for path in paths):
+            raise ValueError("Invalid skills configuration: paths must be an array of non-empty strings.")
+        if not isinstance(last_synced, str):
+            raise ValueError("Invalid skills configuration: last_synced_cli_version must be a string.")
+        return {
+            "schema_version": self._SKILLS_SCHEMA_VERSION,
+            "paths": list(paths),
+            "last_synced_cli_version": last_synced,
+        }
+
+    def set_skill_preferences(self, paths: list[str], *, last_synced_cli_version: str = "") -> dict:
+        config_data = self._load_config_file()
+        skills = {
+            "schema_version": self._SKILLS_SCHEMA_VERSION,
+            "paths": list(paths),
+            "last_synced_cli_version": last_synced_cli_version,
+        }
+        config_data["skills"] = skills
+        self._save_config_file(config_data)
+        return skills
 
     def _get_config_value(self, key: str, default: str | None = None) -> str | None:
         env_value = os.getenv(key)

@@ -17,12 +17,10 @@ from .embedding_presets import (
     embedding_preset_for_model,
 )
 from .skill_installer import (
-    DEFAULT_SKILL_TARGET_IDS,
-    SKILL_TARGETS,
     SkillInstallError,
-    install_skill_targets,
-    parse_skill_targets,
-    status_skill_targets,
+    install_skill_containers,
+    normalize_skill_containers,
+    status_skill_containers,
 )
 
 
@@ -86,6 +84,18 @@ class SmartSearchArgumentParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("allow_abbrev", False)
         super().__init__(*args, **kwargs)
+
+    def error(self, message: str) -> None:
+        if self.prog.startswith("smart-search skills") and "unrecognized arguments" in message:
+            message += (
+                ". Select destinations with `smart-search skills install [TARGET_OR_PATH ...]`; "
+                "custom arguments are Skill Container paths"
+            )
+        elif self.prog == "smart-search setup" and any(
+            flag in message for flag in ("--install-skills", "--skills-root")
+        ):
+            message += ". Manage Skill Containers with `smart-search skills install [TARGET_OR_PATH ...]`"
+        super().error(message)
 
 
 TAVILY_DEFAULT_API_URL = "https://api.tavily.com"
@@ -795,14 +805,20 @@ def _format_skills_markdown(data: dict[str, Any]) -> str:
         lines.append(f"Skill: `{data.get('skill')}`")
     if data.get("bundled_files") is not None:
         lines.append(f"Bundled files: {data.get('bundled_files')}")
+    if data.get("current_cli_version") is not None:
+        lines.append(f"Current CLI version: `{data.get('current_cli_version')}`")
+    if data.get("last_synced_cli_version") is not None:
+        lines.append(f"Last synchronized CLI version: `{data.get('last_synced_cli_version')}`")
+    if data.get("sync_pending") is not None:
+        lines.append(f"Synchronization pending: {_yes_no(data.get('sync_pending'))}")
 
-    targets = data.get("targets") or data.get("installed") or []
-    if targets:
+    installations = data.get("installations") or data.get("installed") or []
+    if installations:
         rows = []
-        for item in targets:
+        for item in installations:
             rows.append(
                 [
-                    item.get("target", ""),
+                    item.get("container", ""),
                     item.get("status", "installed"),
                     item.get("files", item.get("installed_files", "")),
                     item.get("installed_files", ""),
@@ -811,11 +827,11 @@ def _format_skills_markdown(data: dict[str, Any]) -> str:
                     item.get("path", ""),
                 ]
             )
-        lines.extend(["", "## Targets"])
-        lines.extend(_markdown_table(["Target", "Status", "Files", "Installed", "Hash match", "Extra", "Path"], rows))
+        lines.extend(["", "## Skill Containers"])
+        lines.extend(_markdown_table(["Container", "Status", "Files", "Installed", "Hash match", "Extra", "Path"], rows))
     if data.get("failed"):
         lines.extend(["", "## Failed"])
-        lines.extend(_markdown_table(["Target", "Path", "Error"], [[item.get("target"), item.get("path"), item.get("error")] for item in data.get("failed", [])]))
+        lines.extend(_markdown_table(["Container", "Path", "Error"], [[item.get("container"), item.get("path"), item.get("error")] for item in data.get("failed", [])]))
     lines.extend(_error_lines(data))
     return "\n".join(lines).strip() + "\n"
 
@@ -1127,12 +1143,12 @@ def _format_content(command: str, data: dict[str, Any]) -> str:
     if command == "skills":
         if data.get("error"):
             return f"Skills {_status_label(data.get('ok'))}: {_error_summary(data)}\n"
-        targets = data.get("targets") or data.get("installed") or []
+        installations = data.get("installations") or data.get("installed") or []
         counts = data.get("status_counts") or {}
         if counts:
             summary = ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
             return f"Skills {_status_label(data.get('ok'))}: {summary}\n"
-        return f"Skills {_status_label(data.get('ok'))}: {len(targets)} targets\n"
+        return f"Skills {_status_label(data.get('ok'))}: {len(installations)} containers\n"
     if command in {
         "map",
         "exa-search",
@@ -1689,49 +1705,6 @@ def _select_setup_language(lang: str = "") -> str:
     return "zh"
 
 
-def _skill_target_choices(selected: list[str], lang: str) -> list[dict[str, Any]]:
-    selected_set = set(selected)
-    choices: list[dict[str, Any]] = []
-    for target in SKILL_TARGETS:
-        label = target.label
-        name = f"{label} (~/{target.relative_root})"
-        choices.append({"name": name, "value": target.target_id, "enabled": target.target_id in selected_set})
-    return choices
-
-
-def _prompt_skill_targets(lang: str) -> list[str]:
-    _write_stderr(
-        _t(
-            lang,
-            "\n[可选] 安装 smart-search-cli skill\n用途: 让本机全局 AI 工具知道优先调用 smart-search CLI。\n提示: 只安装 Smart Search skill；不会初始化 Trellis，也不会生成 hooks、agents 或 commands。\n",
-            "\n[Optional] Install the smart-search-cli skill\nPurpose: teach user-level AI tools on this machine to call the smart-search CLI first.\nNote: this only installs the Smart Search skill; it does not initialize Trellis or generate hooks, agents, or commands.\n",
-        )
-    )
-    tui_value = _checkbox_with_tui(
-        _t(lang, "安装给哪些 AI 工具使用?", "Install for which AI tools?"),
-        _skill_target_choices(DEFAULT_SKILL_TARGET_IDS, lang),
-    )
-    if tui_value is not None:
-        return [target.target_id for target in SKILL_TARGETS if target.target_id in set(tui_value)]
-
-    default_text = ",".join(DEFAULT_SKILL_TARGET_IDS)
-    _write_stderr(
-        _t(
-            lang,
-            f"安装 skill 目标 [codex,claude,cursor,.../all/skip] ({default_text}): ",
-            f"Skill install targets [codex,claude,cursor,.../all/skip] ({default_text}): ",
-        )
-    )
-    raw = input("").strip()
-    if not raw:
-        return list(DEFAULT_SKILL_TARGET_IDS)
-    try:
-        return parse_skill_targets(raw)
-    except SkillInstallError as e:
-        _write_stderr(f"{e}\n")
-        return list(DEFAULT_SKILL_TARGET_IDS)
-
-
 def _setup_choice(prompt: str, choices: set[str], default: str) -> str:
     value = _prompt_choice(prompt, default).strip().lower()
     aliases = {
@@ -2257,7 +2230,6 @@ def _run_guided_setup_prompts(
     current: dict[str, str],
     lang: str,
     *,
-    skill_targets: list[str] | None = None,
     show_banner: bool = True,
 ) -> None:
     config_file = service.config_path()["config_file"]
@@ -2274,30 +2246,11 @@ def _run_guided_setup_prompts(
     _write_setup_keep_note(lang)
     _write_setup_examples(lang)
     _write_setup_status(_setup_status_from_values(_merge_setup_values(current, values)), lang)
-    if skill_targets is not None:
-        skill_targets[:] = _prompt_skill_targets(lang)
     _prompt_main_search(values, current, lang)
     _prompt_docs_search(values, current, lang)
     _prompt_web_fetch(values, current, lang)
     _prompt_optional_enhancements(values, current, lang)
     _prompt_intent_router(values, current, lang)
-
-
-def _write_skill_install_summary(result: dict[str, Any], lang: str) -> None:
-    if not result.get("selected"):
-        _write_stderr(_t(lang, "\nSkill 安装: 已跳过。\n", "\nSkill install: skipped.\n"))
-        return
-    _write_stderr(
-        _t(
-            lang,
-            f"\nSkill 安装结果: installed {result.get('installed_count', 0)}, skipped {result.get('skipped_count', 0)}, failed {result.get('failed_count', 0)}\n",
-            f"\nSkill install result: installed {result.get('installed_count', 0)}, skipped {result.get('skipped_count', 0)}, failed {result.get('failed_count', 0)}\n",
-        )
-    )
-    for item in result.get("installed", []):
-        _write_stderr(f"  [OK] {item.get('label')} -> {item.get('path')}\n")
-    for item in result.get("failed", []):
-        _write_stderr(f"  [FAILED] {item.get('label')} -> {item.get('path')}: {item.get('error')}\n")
 
 
 def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str], lang: str) -> None:
@@ -2535,47 +2488,65 @@ def _run_config(args: argparse.Namespace) -> int:
     return _print_result("config", data, args.format, args.output)
 
 
-def _skill_targets_from_args(args: argparse.Namespace) -> list[str]:
-    if getattr(args, "all", False):
-        return [target.target_id for target in SKILL_TARGETS]
-    raw = getattr(args, "targets", "") or ""
-    if raw:
-        return parse_skill_targets(raw)
-    return list(DEFAULT_SKILL_TARGET_IDS)
-
-
 def _run_skills(args: argparse.Namespace) -> int:
+    current_version = _get_version()
     try:
-        target_ids = _skill_targets_from_args(args)
-    except SkillInstallError as e:
-        data = {"ok": False, "error_type": "parameter_error", "error": str(e), "selected": []}
-        return _print_result("skills", data, args.format, args.output)
-
-    if args.skills_command == "status":
-        try:
-            data = status_skill_targets(target_ids, project_root=args.skills_root)
-        except SkillInstallError as e:
-            data = {"ok": False, "error_type": "runtime_error", "error": str(e), "selected": target_ids}
-        return _print_result("skills", data, args.format, args.output)
-
-    if args.skills_command == "update":
-        try:
-            data = install_skill_targets(target_ids, project_root=args.skills_root)
-        except SkillInstallError as e:
-            data = {"ok": False, "error_type": "runtime_error", "error": str(e), "selected": target_ids}
-        return _print_result("skills", data, args.format, args.output)
-
-    data = {"ok": False, "error_type": "parameter_error", "error": "Unknown skills command", "selected": target_ids}
+        if args.skills_command == "install":
+            requested = args.target_or_path or ["agents"]
+            paths = normalize_skill_containers(requested)
+            preferences = service.config.set_skill_preferences(paths)
+            data = install_skill_containers(paths)
+            if data["ok"]:
+                preferences = service.config.set_skill_preferences(paths, last_synced_cli_version=current_version)
+            else:
+                data.update(error_type="runtime_error", error="One or more Skill Containers failed to install.")
+            data.update(
+                current_cli_version=current_version,
+                last_synced_cli_version=preferences["last_synced_cli_version"],
+                sync_pending=bool(paths) and preferences["last_synced_cli_version"] != current_version,
+            )
+        elif args.skills_command == "clear":
+            preferences = service.config.set_skill_preferences([], last_synced_cli_version=current_version)
+            data = {
+                "ok": True,
+                "paths": [],
+                "cleared": True,
+                **preferences,
+                "current_cli_version": current_version,
+                "sync_pending": False,
+            }
+        else:
+            preferences = service.config.get_skill_preferences()
+            if preferences is None:
+                raise ValueError("No Skill Installation Preference is saved. Run `smart-search skills install`.")
+            try:
+                paths = normalize_skill_containers(preferences["paths"])
+            except SkillInstallError as error:
+                raise ValueError(f"Invalid saved Skill Installation Preference: {error}") from error
+            if args.skills_command == "status":
+                data = status_skill_containers(paths)
+            elif args.skills_command == "update":
+                preferences = service.config.set_skill_preferences(paths)
+                data = install_skill_containers(paths)
+                if data["ok"]:
+                    preferences = service.config.set_skill_preferences(paths, last_synced_cli_version=current_version)
+                else:
+                    data.update(error_type="runtime_error", error="One or more Skill Containers failed to update.")
+            else:
+                data = {"ok": False, "error_type": "parameter_error", "error": "Unknown skills command"}
+            data.update(
+                current_cli_version=current_version,
+                last_synced_cli_version=preferences["last_synced_cli_version"],
+                sync_pending=bool(paths) and preferences["last_synced_cli_version"] != current_version,
+            )
+    except SkillInstallError as error:
+        data = {"ok": False, "error_type": "parameter_error", "error": str(error), "paths": []}
+    except ValueError as error:
+        data = {"ok": False, "error_type": "config_error", "error": str(error), "paths": []}
     return _print_result("skills", data, args.format, args.output)
 
 
 def _run_setup(args: argparse.Namespace) -> int:
-    try:
-        explicit_skill_targets = parse_skill_targets(args.install_skills) if args.install_skills else []
-    except SkillInstallError as e:
-        data = {"ok": False, "error_type": "parameter_error", "error": str(e), "config_file": service.config_path()["config_file"]}
-        return _print_result("setup", data, args.format, args.output)
-
     values = {
         "XAI_API_URL": args.xai_api_url,
         "XAI_API_KEY": args.xai_api_key,
@@ -2624,7 +2595,6 @@ def _run_setup(args: argparse.Namespace) -> int:
     }
 
     lang = args.lang if args.lang in {"zh", "en"} else "zh"
-    selected_skill_targets: list[str] = list(explicit_skill_targets)
     setup_warnings: list[str] = []
     current_for_setup: dict[str, str] = {}
 
@@ -2635,8 +2605,7 @@ def _run_setup(args: argparse.Namespace) -> int:
         if args.advanced:
             _run_advanced_setup_prompts(values, current_for_setup, lang)
         else:
-            skill_targets_for_prompt = selected_skill_targets if not args.skip_skills and not selected_skill_targets else None
-            _run_guided_setup_prompts(values, current_for_setup, lang, skill_targets=skill_targets_for_prompt, show_banner=False)
+            _run_guided_setup_prompts(values, current_for_setup, lang, show_banner=False)
         if _has_embedding_setup_values(values):
             setup_warnings.extend(_apply_embedding_setup_preset(values, current_for_setup, interactive=True, lang=lang))
     else:
@@ -2650,26 +2619,14 @@ def _run_setup(args: argparse.Namespace) -> int:
             result = service.config_set(key, value)
             saved[key] = result.get("value", "")
 
-    skill_result = None
-    if not args.skip_skills and selected_skill_targets:
-        skill_result = install_skill_targets(selected_skill_targets, project_root=args.skills_root)
-
-    ok = True if skill_result is None else bool(skill_result.get("ok", False))
-    data = {"ok": ok, "config_file": service.config_path()["config_file"], "saved": saved}
+    data = {"ok": True, "config_file": service.config_path()["config_file"], "saved": saved}
     if setup_warnings:
         data["warnings"] = setup_warnings
-    if skill_result is not None:
-        data["skills"] = skill_result
-        if not skill_result.get("ok", False):
-            data["error_type"] = "runtime_error"
-            data["error"] = "One or more skill targets failed to install."
     if not args.non_interactive:
         current_after = service.config_list(show_secrets=True)["values"]
         final_values = _merge_setup_values(current_after, values)
         final_status = _setup_status_from_values(final_values)
         _write_stderr(_t(lang, "\n保存完成。\n", "\nSaved.\n"))
-        if skill_result is not None:
-            _write_skill_install_summary(skill_result, lang)
         _write_setup_status(final_status, lang, final=True)
         missing = [capability for capability in ("main_search", "docs_search", "web_fetch") if not final_status[capability]["ok"]]
         if missing:
@@ -3006,34 +2963,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     skills_parser.set_defaults(command="skills")
     skills_sub = skills_parser.add_subparsers(dest="skills_command", required=True, parser_class=SmartSearchArgumentParser)
+    skills_install = skills_sub.add_parser(
+        "install",
+        help="Install to and save the complete Skill Installation Preference.",
+    )
+    skills_install.set_defaults(skills_command="install")
+    skills_install.add_argument(
+        "target_or_path",
+        nargs="*",
+        metavar="TARGET_OR_PATH",
+        help="Built-in agents, claude, or hermes name, or a custom Skill Container path.",
+    )
+    _add_format_args(skills_install)
     skills_status = skills_sub.add_parser("status", aliases=SKILLS_COMMAND_ALIASES["status"], help="Compare bundled and installed skill files.")
     skills_status.set_defaults(skills_command="status")
-    skills_status.add_argument(
-        "--targets",
-        default=",".join(DEFAULT_SKILL_TARGET_IDS),
-        help="Comma-separated AI tool targets, e.g. codex,claude,cursor,hermes.",
-    )
-    skills_status.add_argument("--all", action="store_true", help="Check every known skill target.")
-    skills_status.add_argument(
-        "--skills-root",
-        default="",
-        help="Advanced override for the user-level skill root; defaults to the current user's home directory.",
-    )
     _add_format_args(skills_status)
-    skills_update = skills_sub.add_parser("update", aliases=SKILLS_COMMAND_ALIASES["update"], help="Overwrite selected installed skill files with bundled assets.")
+    skills_update = skills_sub.add_parser("update", aliases=SKILLS_COMMAND_ALIASES["update"], help="Overwrite managed files in every saved Skill Container.")
     skills_update.set_defaults(skills_command="update")
-    skills_update.add_argument(
-        "--targets",
-        default=",".join(DEFAULT_SKILL_TARGET_IDS),
-        help="Comma-separated AI tool targets, e.g. codex,claude,cursor,hermes.",
-    )
-    skills_update.add_argument("--all", action="store_true", help="Update every known skill target.")
-    skills_update.add_argument(
-        "--skills-root",
-        default="",
-        help="Advanced override for the user-level skill root; defaults to the current user's home directory.",
-    )
     _add_format_args(skills_update)
+    skills_clear = skills_sub.add_parser("clear", help="Clear saved Skill Containers without deleting installed files.")
+    skills_clear.set_defaults(skills_command="clear")
+    _add_format_args(skills_clear)
 
     setup_parser = sub.add_parser(
         "setup", aliases=COMMAND_ALIASES["setup"], help="Interactively save local provider configuration."
@@ -3042,16 +2992,10 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--non-interactive", action="store_true", help="Only save values passed as flags.")
     setup_parser.add_argument("--lang", choices=["zh", "en"], default="", help="Interactive setup language.")
     setup_parser.add_argument("--advanced", action="store_true", help="Show every low-level config key in interactive setup.")
-    setup_parser.add_argument("--skip-skills", action="store_true", help="Skip user-level smart-search-cli skill installation.")
     setup_parser.add_argument(
-        "--install-skills",
-        default="",
-        help="Comma-separated AI tool targets for smart-search-cli skill installation, e.g. codex,claude,cursor,hermes.",
-    )
-    setup_parser.add_argument(
-        "--skills-root",
-        default="",
-        help="Advanced override for the user-level skill root; defaults to the current user's home directory.",
+        "--skip-skills",
+        action="store_true",
+        help="Keep Skill Installation Preferences unchanged during interactive setup.",
     )
     setup_parser.add_argument("--xai-api-url", default="", help="Save XAI_API_URL.")
     setup_parser.add_argument("--xai-api-key", default="", help="Save XAI_API_KEY.")
@@ -3129,7 +3073,22 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] in (["skills"], ["skill"]) and any(
+        flag in arguments for flag in ("--targets", "--all", "--skills-root")
+    ):
+        parser.error(
+            "removed Skill selection flag; use `smart-search skills install [TARGET_OR_PATH ...]` "
+            "with agents, claude, hermes, or a custom Skill Container"
+        )
+    if arguments[:1] in (["setup"], ["init"]) and any(
+        flag in arguments for flag in ("--install-skills", "--skills-root")
+    ):
+        parser.error(
+            "removed setup Skill flag; manage Skill Containers with "
+            "`smart-search skills install [TARGET_OR_PATH ...]`"
+        )
+    args = parser.parse_args(arguments)
     try:
         if args.command == "regression":
             return _run_regression()

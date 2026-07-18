@@ -31,12 +31,12 @@ Select the first branch whose condition matches the user's task. Load only the c
 
 ### 3. Update an installed Skill
 
-**Choose this branch when:** the user explicitly asks to refresh or synchronize an installed Smart Search Skill and `smart-search skills status --targets TARGET --format json` reports that target as `stale`.
+**Choose this branch when:** the user explicitly asks to refresh or synchronize installed Smart Search Skills and `smart-search skills status --format json` reports a saved path as `stale`.
 
-1. Run the read-only `smart-search skills status --targets TARGET --format json` check to record the target and stale files.
-2. Run `smart-search skills update --targets TARGET --format json`, then rerun the status command. Read `references/setup-config.md` for target selection and the update boundary; this path must not rerun provider setup or delete extra user files.
+1. Run the read-only `smart-search skills status --format json` check to record saved containers and stale files.
+2. Run `smart-search skills update --format json`, then rerun status. Read `references/setup-config.md` for saved preference management and the update boundary; this path must not rerun provider setup or delete extra user files.
 
-**Completion criterion:** the requested target reports `up_to_date` after the update, or the update failure and target path are reported explicitly.
+**Completion criterion:** each saved path reports `up_to_date` or `extra_files` after the update, or the update failure and path are reported explicitly.
 
 ### 4. Validate architecture changes
 

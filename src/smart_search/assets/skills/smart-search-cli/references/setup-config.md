@@ -33,10 +33,10 @@
 ## Setup Workflow
 
 - Interactive `smart-search setup` is a language-selecting grouped wizard with arrow-key / Space / Enter provider selection. It guides users through required `main_search`, `docs_search`, and fetch capability, then optional `web_search` reinforcement and optional smart intent router configuration.
-- Default `smart-search setup` shows a Smart Search ASCII banner, asks for `zh` or `en`, offers user-level `smart-search-cli` skill installation, then shows a grouped provider wizard.
+- Default `smart-search setup` shows a Smart Search ASCII banner, asks for `zh` or `en`, then shows a grouped provider wizard. Skill destinations are managed separately with `smart-search skills install`.
 - The grouped wizard should use an arrow-key / Space / Enter selector when packaged TUI dependencies are available, with a text fallback for non-TTY and tests.
 - Use `smart-search setup --lang en` for an English wizard.
-- Use `smart-search setup --advanced` only when low-level config keys must be shown one by one; normal intent router, embeddings, and classifier setup is available in the default wizard. `--advanced` does not show the skill prompt unless `--install-skills` is explicit.
+- Use `smart-search setup --advanced` only when low-level config keys must be shown one by one; normal intent router, embeddings, and classifier setup is available in the default wizard.
 - `--non-interactive` keeps script behavior and only saves values passed as flags.
 - Required groups are `main_search`, `docs_search`, and `web_fetch`; `web_search` is optional reinforcement, followed by optional smart intent router configuration.
 - Unchecking a configured provider must not delete existing config values; use `smart-search config unset KEY` for deletion.
@@ -45,16 +45,13 @@
 
 ## Skill Installation Sync
 
-- Skill installation installs the bundled `smart-search-cli` skill into selected AI-tool skill directories and must not run `trellis init`, create hooks, create agents, create commands, or modify other skills.
-- Targets are user-level/global directories under the current user's home directory, for example Codex `~/.codex/skills/`, Claude Code `~/.claude/skills/`, Cursor `~/.cursor/skills/`, GitHub Copilot `~/.copilot/skills/`, and Hermes Agent `~/.hermes/skills/`.
-- Skill targets are `codex`, `claude`, `cursor`, `opencode`, `copilot`, `gemini`, `kiro`, `qoder`, `codebuddy`, `droid`, `pi`, `kilo`, `antigravity`, `windsurf`, and `hermes`.
-- `--skip-skills` disables skill installation.
-- `--install-skills codex,claude,cursor,hermes` selects targets explicitly.
-- `--skills-root PATH` is an advanced override for the user-level install root used in portable installs or tests. Normal users should omit it.
-- `smart-search skills status --targets codex,claude,cursor,hermes --format json` compares bundled skill files with installed user-level skill directories. Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and `error`. It reports target paths, bundled file count, installed file count, hashes, hash match flags, missing files, stale files, and extra files. It must not write or delete files.
-- `smart-search skills update --targets codex,claude,cursor,hermes --format json` overwrites the managed bundled `smart-search-cli` files for selected targets. `smart-search skills update --all --format json` selects every target id.
-- This daily sync path must not change provider keys, run setup prompts, create Trellis files, create hooks, create agents, create commands, or delete leftover files. Extra installed files are only reported by `skills status`.
-- `smart-search setup --non-interactive --install-skills codex` remains the first-time setup compatibility path. Prefer `skills status` and `skills update` for routine global skill synchronization after CLI upgrades.
+- `smart-search skills install [TARGET_OR_PATH ...]` installs the bundled `smart-search-cli` child Skill and completely replaces the saved Skill Installation Preference. With no arguments it selects only `agents` (`~/.agents/skills`).
+- The only built-in names are `agents`, `claude`, and `hermes`, resolving to `~/.agents/skills`, `~/.claude/skills`, and `~/.hermes/skills`. Other positional arguments are custom Skill Container paths and can be mixed with built-ins.
+- Saved paths are expanded, made absolute, lexically normalized, and platform-deduplicated without resolving symlinks. Empty paths, filesystem roots, and existing non-directories are rejected before Skill writes.
+- `smart-search skills status --format json` compares bundled files with every saved container. Status values are `missing`, `up_to_date`, `stale`, `extra_files`, and `error`; managed hash match remains distinct from exact hash match.
+- `smart-search skills update --format json` overwrites current bundled managed files in every saved container while preserving user-added and obsolete extra files.
+- `smart-search skills clear --format json` saves an empty preference and stops future management without deleting installed files. Empty preferences are valid for status and update.
+- Provider setup never changes Skill preferences. Skill management must not run setup prompts, create Trellis files, hooks, agents, or commands, modify provider keys, or delete leftover files.
 
 ## Provider Endpoint Setup
 

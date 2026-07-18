@@ -45,10 +45,11 @@ smart-search rs "https://example.com/source" --fallback off --format markdown
 smart-search setup
 smart-search setup --lang en
 smart-search setup --advanced
-smart-search setup --non-interactive --install-skills hermes
-smart-search skills status --targets codex --format json
-smart-search skills update --targets codex --format json
-smart-search skills update --all --format json
+smart-search skills install
+smart-search skills install agents claude hermes "C:\Users\me\.other-tool\skills"
+smart-search skills status --format json
+smart-search skills update --format json
+smart-search skills clear --format json
 smart-search route "React useEffect API docs" --format markdown
 smart-search setup --non-interactive --zhipu-api-url "https://open.bigmodel.cn/api" --zhipu-search-engine "search_std"
 smart-search setup --non-interactive --openai-compatible-stream true
