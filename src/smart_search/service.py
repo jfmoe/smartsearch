@@ -32,7 +32,7 @@ from .intent_router import (
     _semantic_summary,
 )
 from .logger import log_info
-from .providers.anysearch import AnySearchProvider
+from .providers.anysearch import AnySearchProvider, get_verified_domain_manifest
 from .providers.context7 import Context7Provider
 from .providers.exa import ExaSearchProvider
 from .providers.jina import JinaReaderProvider
@@ -1444,6 +1444,7 @@ async def research(
 
 def get_capability_status() -> dict[str, Any]:
     main_configured = _configured_main_search_provider_ids()
+    anysearch_manifest = get_verified_domain_manifest()
     status = {
         "main_search": {
             "configured": main_configured,
@@ -1491,6 +1492,23 @@ def get_capability_status() -> dict[str, Any]:
             "configured": ["anysearch"] if config.anysearch_api_key else [],
             "fallback_chain": ["anysearch"],
             "experimental": True,
+            "automatic_vertical_discovery": bool(config.anysearch_api_key),
+            "operation_live": {
+                operation: {"status": "not_checked"}
+                for operation in (
+                    "discover_domains",
+                    "vertical_discovery",
+                    "vertical_search",
+                    "batch_discovery",
+                    "anysearch_extraction",
+                )
+            },
+            "verified_domains": [
+                f"{item['domain']}.{item['sub_domain']}" for item in anysearch_manifest["verified_domains"]
+            ],
+            "verified_domain_count": len(anysearch_manifest["verified_domains"]),
+            "domain_search_ready": bool(anysearch_manifest["verified_domains"]),
+            "domain_assessments": anysearch_manifest["candidate_assessments"],
         },
     }
     for capability in ("web_search", "docs_search", "web_fetch", "vertical_search"):

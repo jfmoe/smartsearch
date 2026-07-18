@@ -1,0 +1,21 @@
+{
+  "fixture_version": 1,
+  "provenance": "synthetic_mock",
+  "domain": "finance",
+  "sub_domain": "fundamental",
+  "parameter_schema": {
+    "type": "object",
+    "required": ["ticker"],
+    "properties": {
+      "ticker": {"type": "string"},
+      "period": {"type": "string", "enum": ["annual", "quarterly"]}
+    }
+  },
+  "valid_params": {"ticker": "AAPL", "period": "annual"},
+  "valid_result": {
+    "structuredContent": {"ticker": "AAPL", "revenue": 391035000000, "currency": "USD"},
+    "content": [{"type": "text", "text": "AAPL annual revenue: 391035000000 USD"}]
+  },
+  "missing_required_error": {"code": -32602, "message": "ticker is required"},
+  "provider_error": {"isError": true, "content": [{"type": "text", "text": "finance provider unavailable"}]}
+}

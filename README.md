@@ -374,6 +374,8 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 
 `anysearch-search` without a domain is explicit Vertical Discovery. Domain search requires separate `--domain` and `--sub-domain` values plus at most one JSON object in `--sub-domain-params`; the object is nested unchanged under the upstream `sub_domain_params` field and output exposes only its keys. Dotted shorthand such as `security.cve`, legacy sub-domain aliases, incomplete pairs, invalid/non-object JSON, and reserved-field overrides fail locally with migration guidance. Smart Search validates required/type/enum only from a reliable, versioned Verified Domain Contract; live discovery schemas remain acceptance evidence. Without such a contract, `schema_validation.status=unavailable` is stable and the request is sent upstream without implicit discovery.
 
+The versioned Verified Domain Manifest is the sole support authority. Its verified set is currently empty: `academic.search`, `security.vuln`, `finance.fundamental`, and `code.doc` remain discovered/unverified with explicit live and stability gaps. `doctor` exposes configured state, the automatic Vertical Discovery switch, independent operation-live status, verified domains, and candidate assessments. See [the first domain matrix](docs/anysearch-verified-domain-manifest.md); mock fixtures and one successful live call never promote a domain.
+
 Local config path:
 
 - Windows default: `%LOCALAPPDATA%\smart-search\config.json`.

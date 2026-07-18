@@ -32,9 +32,15 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 smart_search = [
+    "assets/anysearch/*.json",
     "assets/skills/smart-search-cli/SKILL.md",
     "assets/skills/smart-search-cli/agents/*.yaml",
     "assets/skills/smart-search-cli/references/*.md",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "live_acceptance: opt-in checks against the live AnySearch MCP endpoint",
 ]
 
 [project.scripts]

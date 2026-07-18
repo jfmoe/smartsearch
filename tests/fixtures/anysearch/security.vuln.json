@@ -1,0 +1,21 @@
+{
+  "fixture_version": 1,
+  "provenance": "synthetic_mock",
+  "domain": "security",
+  "sub_domain": "vuln",
+  "parameter_schema": {
+    "type": "object",
+    "required": ["product"],
+    "properties": {
+      "product": {"type": "string"},
+      "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"]}
+    }
+  },
+  "valid_params": {"product": "xz", "severity": "critical"},
+  "valid_result": {
+    "structuredContent": {"identifier": "CVE-2024-3094", "severity": "critical", "affected": "xz utils"},
+    "content": [{"type": "text", "text": "CVE-2024-3094 severity: critical\nAffected: xz utils"}]
+  },
+  "missing_required_error": {"code": -32602, "message": "product is required"},
+  "provider_error": {"isError": true, "content": [{"type": "text", "text": "security provider unavailable"}]}
+}

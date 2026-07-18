@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "verified_domains": [],
+  "candidate_assessments": [
+    {
+      "id": "academic.search",
+      "domain": "academic",
+      "sub_domain": "search",
+      "status": "discovered_unverified",
+      "acceptance_date": null,
+      "schema_fingerprint": "sha256:ba58664590ecf71dcae6d10bf74bf40898e471c36c40e564f5d920b0e2807e7a",
+      "evidence": {
+        "provenance": "synthetic_mock",
+        "fixture": "tests/fixtures/anysearch/academic.search.json"
+      },
+      "gaps": [
+        "No sanitized live discovery capture is versioned.",
+        "No independent live valid-request, invalid-params, provider-error, and result-shape acceptance run is recorded.",
+        "No upstream schema/version stability window has been established."
+      ]
+    },
+    {
+      "id": "security.vuln",
+      "domain": "security",
+      "sub_domain": "vuln",
+      "status": "discovered_unverified",
+      "acceptance_date": null,
+      "schema_fingerprint": "sha256:62554403e24fafcf470a05fa6ec6be9aebac9b58fd7a845944cb6f5a81d4bac1",
+      "evidence": {
+        "provenance": "synthetic_mock",
+        "fixture": "tests/fixtures/anysearch/security.vuln.json"
+      },
+      "gaps": [
+        "No sanitized live discovery capture is versioned.",
+        "No independent live valid-request, invalid-params, provider-error, and result-shape acceptance run is recorded.",
+        "No upstream schema/version stability window has been established."
+      ]
+    },
+    {
+      "id": "finance.fundamental",
+      "domain": "finance",
+      "sub_domain": "fundamental",
+      "status": "discovered_unverified",
+      "acceptance_date": null,
+      "schema_fingerprint": "sha256:b4d25ba0cf14832e1c3aed2b76092199be92e01d51e53e10b049a7555f269333",
+      "evidence": {
+        "provenance": "synthetic_mock",
+        "fixture": "tests/fixtures/anysearch/finance.fundamental.json"
+      },
+      "gaps": [
+        "No sanitized live discovery capture is versioned.",
+        "No independent live valid-request, invalid-params, provider-error, and result-shape acceptance run is recorded.",
+        "No upstream schema/version stability window has been established."
+      ]
+    },
+    {
+      "id": "code.doc",
+      "domain": "code",
+      "sub_domain": "doc",
+      "status": "discovered_unverified",
+      "acceptance_date": null,
+      "schema_fingerprint": "sha256:3364a7289a0ac582b93faaf033e936e252dbe5cd8a721653e9be3158745127f9",
+      "evidence": {
+        "provenance": "synthetic_mock",
+        "fixture": "tests/fixtures/anysearch/code.doc.json"
+      },
+      "gaps": [
+        "No sanitized live discovery capture is versioned.",
+        "No independent live valid-request, invalid-params, provider-error, and result-shape acceptance run is recorded.",
+        "No upstream schema/version stability window has been established."
+      ]
+    }
+  ]
+}

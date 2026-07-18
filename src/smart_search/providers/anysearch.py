@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from importlib.resources import files
 from typing import Any
 
 import httpx
@@ -9,7 +10,68 @@ from .base import BaseSearchProvider
 
 
 _RESERVED_SUB_DOMAIN_FIELDS = {"query", "domain", "sub_domain", "max_results"}
-_LEGACY_SUB_DOMAIN_ALIASES = {("security", "cve"): ("security", "vuln")}
+_FORBIDDEN_LEGACY_SUB_DOMAINS = {("security", "cve")}
+_MANIFEST_RESOURCE = "assets/anysearch/verified-domain-manifest.json"
+
+
+def get_verified_domain_manifest() -> dict[str, Any]:
+    """Return an isolated copy of the versioned Verified Domain Manifest."""
+    resource = files("smart_search").joinpath(_MANIFEST_RESOURCE)
+    manifest = json.loads(resource.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != 1:
+        raise ValueError("Unsupported AnySearch Verified Domain Manifest schema")
+    if not isinstance(manifest.get("verified_domains"), list):
+        raise ValueError("AnySearch Verified Domain Manifest must contain verified_domains")
+    if not isinstance(manifest.get("candidate_assessments"), list):
+        raise ValueError("AnySearch Verified Domain Manifest must contain candidate_assessments")
+    contract_fields = {"domain", "sub_domain", "acceptance_date", "schema_fingerprint", "parameter_schema"}
+    for contract in manifest["verified_domains"]:
+        if not isinstance(contract, dict) or not contract_fields.issubset(contract):
+            raise ValueError("Every Verified Domain Contract must contain identity, date, fingerprint, and schema")
+        if contract.get("status") != "verified":
+            raise ValueError("Verified Domain Contracts must have status=verified")
+    for assessment in manifest["candidate_assessments"]:
+        if not isinstance(assessment, dict) or assessment.get("status") != "discovered_unverified":
+            raise ValueError("Candidate assessments must remain discovered_unverified")
+    return manifest
+
+
+def _domain_status(domain: str, sub_domain: str) -> str:
+    manifest = get_verified_domain_manifest()
+    for contract in manifest["verified_domains"]:
+        if contract.get("domain") == domain and contract.get("sub_domain") == sub_domain:
+            return "verified"
+    for assessment in manifest["candidate_assessments"]:
+        if assessment.get("domain") == domain and assessment.get("sub_domain") == sub_domain:
+            return str(assessment.get("status") or "discovered_unverified")
+    return "unverified"
+
+
+def _verified_contract(domain: str, sub_domain: str) -> dict[str, Any] | None:
+    for contract in get_verified_domain_manifest()["verified_domains"]:
+        if contract.get("domain") == domain and contract.get("sub_domain") == sub_domain:
+            return contract
+    return None
+
+
+def _schema_errors(schema: dict[str, Any], params: dict[str, Any]) -> list[str]:
+    errors = [f"missing required parameter: {key}" for key in schema.get("required", []) if key not in params]
+    json_types = {
+        "array": list,
+        "boolean": bool,
+        "integer": int,
+        "number": (int, float),
+        "object": dict,
+        "string": str,
+    }
+    for key, value in params.items():
+        rule = schema.get("properties", {}).get(key, {})
+        expected = json_types.get(rule.get("type"))
+        if expected and (not isinstance(value, expected) or rule.get("type") == "integer" and isinstance(value, bool)):
+            errors.append(f"parameter {key} must be {rule['type']}")
+        if "enum" in rule and value not in rule["enum"]:
+            errors.append(f"parameter {key} must be one of: {', '.join(map(str, rule['enum']))}")
+    return errors
 
 
 def _elapsed(start: float) -> float:
@@ -218,14 +280,13 @@ class AnySearchProvider(BaseSearchProvider):
                 "vertical_search",
                 "explicit vertical search requires both --domain and --sub-domain; omit both for Vertical Discovery",
             )
-        replacement = _LEGACY_SUB_DOMAIN_ALIASES.get((domain, sub_domain))
-        if replacement:
+        if (domain, sub_domain) in _FORBIDDEN_LEGACY_SUB_DOMAINS:
             return _parameter_error(
                 operation,
                 "search",
                 "vertical_search",
                 "legacy sub-domain aliases are unsupported; migrate to "
-                f"`--domain {replacement[0]} --sub-domain {replacement[1]}`",
+                "`--domain security --sub-domain vuln`",
             )
         if isinstance(sub_domain_params, str):
             try:
@@ -266,17 +327,37 @@ class AnySearchProvider(BaseSearchProvider):
         schema_validation = {"status": "not_applicable", "errors": []}
         if explicit:
             arguments.update(domain=domain, sub_domain=sub_domain, sub_domain_params=sub_domain_params)
-            schema_validation = {
-                "status": "unavailable",
-                "errors": [],
-                "message": "No Verified Domain Contract is available; parameters were passed to AnySearch unchanged.",
-            }
+            contract = _verified_contract(domain, sub_domain)
+            if contract:
+                errors = _schema_errors(contract["parameter_schema"], sub_domain_params)
+                if errors:
+                    output = _parameter_error(operation, "search", "vertical_search", "; ".join(errors))
+                    output.update(
+                        domain=domain,
+                        sub_domain=sub_domain,
+                        domain_status="verified",
+                        sub_domain_param_keys=sorted(sub_domain_params),
+                        schema_validation={"status": "invalid", "errors": errors},
+                    )
+                    return output
+                schema_validation = {
+                    "status": "valid",
+                    "errors": [],
+                    "schema_fingerprint": contract["schema_fingerprint"],
+                }
+            else:
+                schema_validation = {
+                    "status": "unavailable",
+                    "errors": [],
+                    "message": "No Verified Domain Contract is available; parameters were passed to AnySearch unchanged.",
+                }
 
         output = await self.call_tool(operation, "search", arguments, "vertical_search")
         output["schema_validation"] = schema_validation
         output["max_results"] = max_results
         if explicit:
             output.update(domain=domain, sub_domain=sub_domain)
+            output["domain_status"] = _domain_status(domain, sub_domain)
             output["sub_domain_param_keys"] = sorted(sub_domain_params)
         return output
 

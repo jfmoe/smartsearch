@@ -384,6 +384,8 @@ smart-search anysearch-batch "AAPL" "RAG papers" --max-results 2 --format json
 
 无域 `anysearch-search` 是显式 Vertical Discovery。域级搜索必须分别提供 `--domain` 和 `--sub-domain`，并可通过单个 `--sub-domain-params` JSON object 原样嵌套到上游 `sub_domain_params` 字段；输出只回显参数键。`security.cve` 等点号简写、旧子域别名、缺半边组合、非法/非 object JSON 和覆盖保留字段都会在联网前返回带迁移提示的 `parameter_error`。只有可靠、版本化的 Verified Domain Contract 才用于 required/type/enum 校验，实时 discovery schema 仍只是验收证据；没有该契约时稳定返回 `schema_validation.status=unavailable`，不隐式 discovery，直接交给上游。
 
+受版本控制的 Verified Domain Manifest 是支持声明的唯一依据。当前 verified 集合为空：`academic.search`、`security.vuln`、`finance.fundamental`、`code.doc` 都仍是 discovered/unverified，并明确记录 live 与稳定性缺口。`doctor` 分别公开 configured 状态、自动 Vertical Discovery 开关、独立的 operation-live 状态、verified domains 与候选评估。详见[首批领域矩阵](docs/anysearch-verified-domain-manifest.md)；mock fixture 或一次 live 成功都不会自动晋级领域。
+
 本机配置文件位置：
 
 - Windows 默认：`%LOCALAPPDATA%\smart-search\config.json`。
