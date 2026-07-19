@@ -385,6 +385,18 @@ def _attempt(
     return data
 
 
+def _credential_pool_attempt_extra(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Surface key_index / rotation facts without credentials."""
+    if not data:
+        return None
+    extra: dict[str, Any] = {}
+    if "key_index" in data and data.get("key_index") is not None:
+        extra["key_index"] = data["key_index"]
+    if data.get("credential_rotated"):
+        extra["credential_rotated"] = True
+    return extra or None
+
+
 def _openai_model_breaker_key(api_url: str, model: str) -> tuple[str, str]:
     return (api_url.rstrip("/"), model)
 
@@ -605,7 +617,7 @@ def _provider_configured(provider: str) -> bool:
     if provider == "tavily":
         return bool(config.tavily_api_key)
     if provider == "jina":
-        return bool(config.jina_api_key)
+        return config.jina_has_credentials()
     if provider == "zhipu-mcp-reader":
         return bool(config.zhipu_mcp_api_key)
     if provider == "firecrawl":
@@ -1516,7 +1528,7 @@ def get_capability_status() -> dict[str, Any]:
                 name
                 for name, enabled in [
                     ("tavily", bool(config.tavily_api_key)),
-                    ("jina", bool(config.jina_api_key)),
+                    ("jina", config.jina_has_credentials()),
                     ("zhipu-mcp-reader", bool(config.zhipu_mcp_api_key)),
                     ("firecrawl", bool(config.firecrawl_api_key)),
                 ]
@@ -1924,7 +1936,7 @@ async def _run_web_fetch_fallback(
     providers = []
     if config.tavily_api_key:
         providers.append("tavily")
-    if config.jina_api_key:
+    if config.jina_has_credentials():
         providers.append("jina")
     if config.zhipu_mcp_api_key:
         providers.append("zhipu-mcp-reader")
@@ -1940,15 +1952,27 @@ async def _run_web_fetch_fallback(
 
     for provider in providers:
         start = time.time()
+        pool_extra: dict[str, Any] | None = None
         try:
             if provider == "tavily":
                 content = await call_tavily_extract(url)
             elif provider == "jina":
                 data = await jina_fetch(url)
                 content = data.get("content") if data.get("ok") else None
+                pool_extra = _credential_pool_attempt_extra(data)
                 if not data.get("ok"):
                     status = "error" if data.get("error_type") in {"auth_error", "config_error", "parameter_error", "quality_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
-                    attempts.append(_attempt("web_fetch", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                    attempts.append(
+                        _attempt(
+                            "web_fetch",
+                            provider,
+                            status,
+                            start,
+                            error_type=data.get("error_type", ""),
+                            error=data.get("error", ""),
+                            extra=pool_extra,
+                        )
+                    )
                     continue
             elif provider == "zhipu-mcp-reader":
                 data = await zhipu_mcp_reader(url)
@@ -1960,14 +1984,14 @@ async def _run_web_fetch_fallback(
             else:
                 content = await call_firecrawl_scrape(url)
             if content and content.strip():
-                attempts.append(_attempt("web_fetch", provider, "ok", start, result_count=1))
+                attempts.append(_attempt("web_fetch", provider, "ok", start, result_count=1, extra=pool_extra))
                 return {
                     "ok": True,
                     "url": url,
                     "provider": provider,
                     "content": content,
                 }, attempts
-            attempts.append(_attempt("web_fetch", provider, "empty", start))
+            attempts.append(_attempt("web_fetch", provider, "empty", start, extra=pool_extra))
         except Exception as e:
             attempts.append(_attempt("web_fetch", provider, "error", start, error_type="runtime_error", error=str(e)))
     return None, attempts
@@ -2270,13 +2294,39 @@ async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
 
 
 async def call_jina_reader(url: str) -> dict[str, Any]:
-    raw = await JinaReaderProvider(
-        config.jina_reader_api_url,
-        config.jina_api_key,
-        config.jina_respond_with,
-        config.jina_timeout,
-    ).fetch(url)
-    return await _decode_provider_json(raw, provider="jina")
+    from .credential_pool import CredentialPoolError, ProviderCredentialPool
+
+    pool = ProviderCredentialPool(config)
+    try:
+        credentials = pool.resolve("jina")
+    except CredentialPoolError as error:
+        return {
+            "ok": False,
+            "provider": "jina",
+            "error_type": "config_error",
+            "error": str(error),
+        }
+
+    # Empty pool: preserve anonymous Reader (no key) for explicit experiments.
+    if not credentials:
+        raw = await JinaReaderProvider(
+            config.jina_reader_api_url,
+            None,
+            config.jina_respond_with,
+            config.jina_timeout,
+        ).fetch(url)
+        return await _decode_provider_json(raw, provider="jina")
+
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        raw = await JinaReaderProvider(
+            config.jina_reader_api_url,
+            credential,
+            config.jina_respond_with,
+            config.jina_timeout,
+        ).fetch(url)
+        return await _decode_provider_json(raw, provider="jina")
+
+    return await pool.execute_with_rotation("jina", attempt, credentials=credentials)
 
 
 async def call_tavily_map(
@@ -3250,8 +3300,13 @@ async def fetch(url: str) -> dict[str, Any]:
             "elapsed_ms": _elapsed_ms(start),
         }
 
-    if not (config.tavily_api_key or config.jina_api_key or config.zhipu_mcp_api_key or config.firecrawl_api_key):
-        error = "TAVILY_API_KEY、JINA_API_KEY、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+    if not (
+        config.tavily_api_key
+        or config.jina_has_credentials()
+        or config.zhipu_mcp_api_key
+        or config.firecrawl_api_key
+    ):
+        error = "TAVILY_API_KEY、JINA_API_KEY/JINA_API_KEYS、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
         error_type = "config_error"
     else:
         error = "所有提取服务均未能获取内容"
@@ -3950,18 +4005,44 @@ async def _test_tavily_connection() -> dict[str, Any]:
 
 
 async def _test_jina_connection() -> dict[str, Any]:
-    if config.jina_respond_with and not config.jina_api_key:
-        return {"status": "config_error", "message": "JINA_RESPOND_WITH requires JINA_API_KEY"}
-    if not config.jina_api_key:
-        return {"status": "not_configured", "message": "JINA_API_KEY 未设置，Jina 不满足 standard web_fetch；匿名 Reader 只能作为显式实验使用"}
+    from .credential_pool import CredentialPoolError, ProviderCredentialPool
+
+    pool = ProviderCredentialPool(config)
+    try:
+        credentials = pool.resolve("jina")
+    except CredentialPoolError as error:
+        return {"status": "config_error", "message": str(error)}
+    pool_status = pool.safe_status("jina")
+    if config.jina_respond_with and not credentials:
+        return {"status": "config_error", "message": "JINA_RESPOND_WITH requires JINA_API_KEY or JINA_API_KEYS"}
+    if not credentials:
+        return {
+            "status": "not_configured",
+            "message": "JINA_API_KEY/JINA_API_KEYS 未设置，Jina 不满足 standard web_fetch；匿名 Reader 只能作为显式实验使用",
+            "credential_pool": pool_status,
+        }
     start = time.time()
     data = await jina_fetch("https://example.com")
     response_time = _elapsed_ms(start)
     if data.get("ok"):
-        return {"status": "ok", "message": "Jina Reader 可用", "response_time_ms": response_time}
+        return {
+            "status": "ok",
+            "message": "Jina Reader 可用",
+            "response_time_ms": response_time,
+            "credential_pool": pool_status,
+            "key_index": data.get("key_index"),
+            "credential_rotated": bool(data.get("credential_rotated")),
+        }
     error_type = data.get("error_type", "")
     status = error_type if error_type in {"auth_error", "config_error", "parameter_error", "rate_limited", "timeout"} else "warning"
-    return {"status": status, "message": data.get("error", "Jina Reader 不可用"), "response_time_ms": response_time}
+    return {
+        "status": status,
+        "message": data.get("error", "Jina Reader 不可用"),
+        "response_time_ms": response_time,
+        "credential_pool": pool_status,
+        "key_index": data.get("key_index"),
+        "credential_rotated": bool(data.get("credential_rotated")),
+    }
 
 
 async def _test_zhipu_connection() -> dict[str, Any]:

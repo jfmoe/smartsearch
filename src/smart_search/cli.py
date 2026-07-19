@@ -1559,7 +1559,7 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 provider
                 for provider, configured in [
                     ("tavily", has("TAVILY_API_KEY")),
-                    ("jina", has("JINA_API_KEY")),
+                    ("jina", has("JINA_API_KEY") or has("JINA_API_KEYS")),
                     ("zhipu-mcp-reader", has("ZHIPU_MCP_API_KEY")),
                     ("firecrawl", has("FIRECRAWL_API_KEY")),
                 ]

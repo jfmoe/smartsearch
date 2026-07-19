@@ -67,6 +67,7 @@ class Config:
         "ZHIPU_MCP_ZREAD_API_URL",
         "ZHIPU_MCP_TIMEOUT_SECONDS",
         "JINA_API_KEY",
+        "JINA_API_KEYS",
         "JINA_READER_API_URL",
         "JINA_RESPOND_WITH",
         "JINA_TIMEOUT_SECONDS",
@@ -658,13 +659,29 @@ class Config:
 
     @property
     def configured_credentials(self) -> list[str]:
-        values = {
-            value
-            for key in self._CONFIG_KEYS
-            if any(marker in key for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTHORIZATION"))
-            if (value := self._get_config_value(key))
-        }
+        values: set[str] = set()
+        for key in self._CONFIG_KEYS:
+            if not any(marker in key for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTHORIZATION")):
+                continue
+            value = self._get_config_value(key)
+            if not value:
+                continue
+            if key.endswith("_API_KEYS"):
+                values.update(self._credential_values_from_keys_field(value))
+                continue
+            values.add(value)
         return sorted(values, key=len, reverse=True)
+
+    @staticmethod
+    def _credential_values_from_keys_field(raw: str) -> list[str]:
+        """Expand a multi-credential JSON array for secret scrubbing; never raises."""
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return [raw] if raw else []
+        if not isinstance(parsed, list):
+            return [raw] if raw else []
+        return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
 
     @staticmethod
     def apply_model_suffix_for_url(model: str, api_url: str) -> str:
@@ -683,9 +700,26 @@ class Config:
 
     @classmethod
     def _mask_if_secret(cls, key: str, value: str) -> str:
+        if key.endswith("_API_KEYS"):
+            return cls._mask_api_keys_value(value)
         if "KEY" in key or "TOKEN" in key or "SECRET" in key:
             return cls._mask_api_key(value)
         return value
+
+    @classmethod
+    def _mask_api_keys_value(cls, value: str) -> str:
+        """Mask each member of a JSON credential array for doctor/config display."""
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return cls._mask_api_key(value)
+        if not isinstance(parsed, list):
+            return cls._mask_api_key(value)
+        masked = [
+            cls._mask_api_key(item) if isinstance(item, str) else "***"
+            for item in parsed
+        ]
+        return json.dumps(masked, ensure_ascii=False)
 
     @property
     def output_cleanup_enabled(self) -> bool:
@@ -781,6 +815,36 @@ class Config:
     @property
     def jina_api_key(self) -> str | None:
         return self._get_config_value("JINA_API_KEY")
+
+    @property
+    def jina_api_keys_raw(self) -> str | None:
+        return self._get_config_value("JINA_API_KEYS")
+
+    def jina_credentials(self) -> list[str]:
+        """Resolved Jina Provider Credential Pool (KEYS overrides KEY)."""
+        from .credential_pool import ProviderCredentialPool
+
+        return ProviderCredentialPool(self).resolve("jina")
+
+    def jina_has_credentials(self) -> bool:
+        from .credential_pool import CredentialPoolError
+
+        try:
+            return bool(self.jina_credentials())
+        except CredentialPoolError:
+            # Invalid KEYS JSON is a configuration error, not "unconfigured".
+            return bool((self.jina_api_keys_raw or "").strip() or (self.jina_api_key or "").strip())
+
+    def _jina_api_keys_display(self) -> str:
+        raw = self.jina_api_keys_raw
+        if not raw or not str(raw).strip():
+            return "未配置"
+        return self._mask_api_keys_value(str(raw))
+
+    def _jina_credential_pool_status(self) -> dict:
+        from .credential_pool import ProviderCredentialPool
+
+        return ProviderCredentialPool(self).safe_status("jina")
 
     @property
     def jina_reader_api_url(self) -> str:
@@ -929,6 +993,8 @@ class Config:
             "ZHIPU_MCP_ZREAD_API_URL": self.zhipu_mcp_zread_api_url,
             "ZHIPU_MCP_TIMEOUT_SECONDS": self.zhipu_mcp_timeout,
             "JINA_API_KEY": self._mask_api_key(self.jina_api_key) if self.jina_api_key else "未配置",
+            "JINA_API_KEYS": self._jina_api_keys_display(),
+            "jina_credential_pool": self._jina_credential_pool_status(),
             "JINA_READER_API_URL": self.jina_reader_api_url,
             "JINA_RESPOND_WITH": self.jina_respond_with,
             "JINA_TIMEOUT_SECONDS": self.jina_timeout,
