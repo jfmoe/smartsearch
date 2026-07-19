@@ -170,6 +170,9 @@ def test_deep_research_cli_contract_documents_plan_and_smoke_matrix():
         "`INTENT_CLASSIFIER_API_URL`",
         "`INTENT_ROUTER_TIMEOUT_SECONDS` defaults to `8`",
         "`deep` remains an offline planner",
+        "--capabilities none",
+        "normalized `--capabilities` declaration",
+        "`smart-search research` keeps its separate live evidence workflow",
     ]
     for marker in required_markers:
         assert marker in public_contract
@@ -200,7 +203,7 @@ def test_search_timeout_retry_policy_is_distributable():
     ]
     contract_markers = [
         "Agent timeout handling contract",
-        "`smart-search search ... --timeout 180 --extra-sources 1 --format json --output PATH`",
+        "`smart-search search ... --capabilities CSV_OR_NONE --timeout 180 --extra-sources 1 --format json --output PATH`",
         "not a shell-level `timeout` wrapper",
         "`SMART_SEARCH_RETRY_*` settings are not the contract",
         "switch to source-first fallback",
@@ -242,6 +245,8 @@ def test_deep_research_readme_documents_capability_orchestration():
         "`required_capabilities`",
         "degraded_reason",
         "Unsupported key claims must be fetched or downgraded to unverified candidates",
+        "--capabilities docs_search,web_search",
+        "--capabilities none",
     ]
     chinese_markers = [
         "Deep Research 不是固定题材配方",
@@ -264,6 +269,8 @@ def test_deep_research_readme_documents_capability_orchestration():
         "`required_capabilities`",
         "degraded_reason",
         "没有 fetch 的来源标为未验证候选",
+        "--capabilities docs_search,web_search",
+        "--capabilities none",
     ]
     for marker in english_markers:
         assert marker in readme

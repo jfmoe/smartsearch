@@ -164,3 +164,19 @@ def test_generated_capability_reference_and_package_mirror_have_no_drift() -> No
     assert (ROOT / PACKAGED_SKILL_PATH / relative_path).read_text(encoding="utf-8") == expected
     result = _run_sync(ROOT, "--check")
     assert result.returncode == 0, result.stderr
+
+
+def test_agent_search_contract_declares_capabilities_without_route_preflight() -> None:
+    for skill_root in (PUBLIC_SKILL_PATH, PACKAGED_SKILL_PATH):
+        skill = (ROOT / skill_root / "SKILL.md").read_text(encoding="utf-8")
+        patterns = (ROOT / skill_root / "references/command-patterns.md").read_text(encoding="utf-8")
+        deep = (ROOT / skill_root / "references/deep-research-mode.md").read_text(encoding="utf-8")
+
+        assert "references/intent-routing-capabilities.md" in skill
+        assert "--capabilities none" in patterns
+        assert "--capabilities docs_search,web_search" in patterns
+        research_branch = skill.split("### 1. Research or retrieval", 1)[1].split("### 2.", 1)[0]
+        assert "ordinary search begins with `search`" in research_branch
+        assert "only for an explicit routing diagnostic" in research_branch
+        assert '"command": "smart-search search \\"query\\" --capabilities none' in deep
+        assert "`smart-search research` keeps its separate" in deep

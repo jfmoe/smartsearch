@@ -390,6 +390,11 @@ def test_deep_research_plan_current_market_is_offline_and_fetch_before_claim(mon
     assert "exa-search" not in tools
     assert tools <= service.DEEP_ALLOWED_TOOLS
     assert all(step["subquestion_id"] for step in result["steps"])
+    search_steps = [step for step in result["steps"] if step["tool"] == "search"]
+    assert search_steps
+    assert all("--capabilities web_search" in step["command"] for step in search_steps)
+    assert all("smart-search route" not in step["command"] for step in search_steps)
+    assert all(step["output_path"] in step["command"] for step in search_steps)
 
 
 def test_deep_research_default_evidence_dir_uses_platform_temp_dir(monkeypatch, tmp_path):
@@ -406,6 +411,9 @@ def test_deep_research_default_evidence_dir_uses_platform_temp_dir(monkeypatch, 
     for step in result["steps"]:
         assert service.Path(step["output_path"]).parent == evidence_path
         assert step["output_path"] in step["command"]
+    search_steps = [step for step in result["steps"] if step["tool"] == "search"]
+    assert search_steps
+    assert all("--capabilities none" in step["command"] for step in search_steps)
 
 
 def test_deep_research_plan_complex_docs_query_has_decomposition():
@@ -422,6 +430,21 @@ def test_deep_research_plan_complex_docs_query_has_decomposition():
     assert {"search", "context7-library", "context7-docs", "fetch"} <= set(tools)
     assert "exa-search" not in tools
     assert result["gap_check"]["unsupported_claim_action"] == "downgrade_to_unverified_candidate"
+    search_steps = [step for step in result["steps"] if step["tool"] == "search"]
+    assert search_steps
+    assert all("--capabilities docs_search" in step["command"] for step in search_steps)
+
+
+def test_deep_research_search_declaration_uses_catalog_order_for_multiple_capabilities():
+    result = service.build_deep_research_plan(
+        "latest React API docs",
+        evidence_dir="C:/tmp/smart-search-evidence/test-docs-current",
+    )
+
+    search_steps = [step for step in result["steps"] if step["tool"] == "search"]
+    assert search_steps
+    assert all("--capabilities docs_search,web_search" in step["command"] for step in search_steps)
+    assert all(step["output_path"] in step["command"] for step in search_steps)
 
 
 def test_deep_research_plan_docs_official_domain_can_add_exa_after_context7():
@@ -448,6 +471,9 @@ def test_deep_research_plan_url_first_starts_with_fetch():
     assert result["steps"][0]["tool"] == "fetch"
     assert "https://example.com/source" in result["steps"][0]["command"]
     assert any(step["tool"] == "exa-similar" for step in result["steps"])
+    search_steps = [step for step in result["steps"] if step["tool"] == "search"]
+    assert search_steps
+    assert all("--capabilities web_fetch" in step["command"] for step in search_steps)
 
 
 def test_deep_research_claim_verification_does_not_unconditionally_add_exa():

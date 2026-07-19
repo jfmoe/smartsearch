@@ -42,7 +42,7 @@ Default orchestration:
 1. Run `smart-search doctor --format json` as preflight when configuration is uncertain.
 2. Call `smart-search deep "question" --format json` to create an offline `research_plan`.
 3. Inspect `intent_signals`, `decomposition`, and `capability_plan`; do not choose fixed topic recipe ids.
-4. Execute planned `smart-search search ... --validation balanced --extra-sources 1..3` steps for broad discovery and read routing metadata.
+4. Execute every planned `smart-search search ... --capabilities CSV_OR_NONE --validation balanced --extra-sources 1..3` step with its normalized declaration and read routing metadata.
 5. Execute planned `exa-search`, `exa-similar`, `zhipu-search`, `context7-library`, `context7-docs`, or `map` only when their capability boundary matches the intent.
 6. Use `fetch` on key URLs before making claim-level statements.
 7. Run `gap_check`: if an important claim lacks fetched evidence, fetch another source or mark the claim/source as unverified.
@@ -97,7 +97,7 @@ Use this shape as the planning artifact:
       "subquestion_id": "sq1",
       "tool": "search",
       "purpose": "broad discovery",
-      "command": "smart-search search \"query\" --validation balanced --extra-sources 1 --format json --output \"<evidence-dir>/YYYYMMDD-HHMM-topic/01-search.json\"",
+      "command": "smart-search search \"query\" --capabilities none --validation balanced --extra-sources 1 --format json --output \"<evidence-dir>/YYYYMMDD-HHMM-topic/01-search.json\"",
       "output_path": "<evidence-dir>/YYYYMMDD-HHMM-topic/01-search.json"
     }
   ],
@@ -140,6 +140,8 @@ Use this shape as the planning artifact:
 Allowed `tool` values are `search`, `exa-search`, `exa-similar`, `zhipu-search`, `context7-library`, `context7-docs`, `fetch`, and `map`; these are the only valid `steps[].tool` values and map to existing CLI commands only. `doctor` is a `preflight` action, not a `steps[]` item. Simple plans may have one subquestion; complex plans should use 2-6 subquestions unless the user explicitly asks for exhaustive coverage.
 
 Each `steps[]` item must include `id`, `subquestion_id`, `tool`, `purpose`, `command`, and `output_path`. `steps[].command` and `steps[].output_path` are one contract: the `--output` path embedded in the executable command must match `output_path`, otherwise the AI agent cannot reliably find saved evidence.
+
+Every planned ordinary `search` step includes the same normalized `--capabilities` declaration derived from the planner's intent signals; it uses exactly `none` when no supplemental ordinary-search capability is needed. The declaration and matching `--output` path make each step directly executable in one call. `smart-search research` keeps its separate live evidence workflow and accepts no caller capability declaration.
 
 Prefer PowerShell-safe quoted commands in generated plans because Windows users often copy planned steps directly from Markdown or JSON output. Avoid hard-coding operating-system-specific roots in reusable examples; use `--evidence-dir PATH` or the CLI-generated `evidence_dir`. Windows paths such as `C:\tmp\smart-search-evidence\...` are explicit examples only, not the runtime default.
 

@@ -17,7 +17,7 @@ CLI-first, skill-driven web research for AI agents and terminal users. `smart-se
 `smart-search` is not an MCP server. It is a normal CLI that AI agents can call through a skill:
 
 ```powershell
-smart-search search "latest OpenAI Responses API changes" --format json
+smart-search search "latest OpenAI Responses API changes" --capabilities docs_search,web_search --format json
 smart-search fetch "https://example.com/article" --format markdown
 smart-search deep "Compare Responses API web_search with Chat Completions search" --format json
 smart-search research "Compare Responses API web_search with Chat Completions search" --format markdown
@@ -31,6 +31,8 @@ The current architecture has two layers:
 | Skill / AI orchestration | Infers user intent, chooses normal search vs Deep Research, executes planned CLI steps, writes final source-backed answers |
 
 Default `smart-search search` stays fast and live. `smart-search deep` is the explicit offline Deep Research planner. It does not call providers, run `doctor`, or fetch pages by default; it emits a `research_plan` that an AI agent or user can execute step by step. `smart-search research` is the live Deep Research executor: it uses the same planner shape, then runs discovery, fetch/read, gap check, and evidence-only synthesis.
+
+Agent-authored ordinary searches pass the complete caller capability declaration in their first `search` call: use a catalog-ordered CSV such as `docs_search,web_search`, or exactly `none` for an empty set. They do not need a `route` preflight. Direct human CLI calls may omit `--capabilities` to retain hybrid routing, while `research` keeps its separate evidence workflow and does not accept this option.
 
 Intent routing now has its own layer. Instead of letting a model pick providers directly, Smart Search first decides which capabilities are needed, then the existing capability-first provider registry chooses same-capability fallback:
 
@@ -91,7 +93,7 @@ smart-search diagnose openai-compatible --format markdown
 3. Run a normal live search:
 
 ```powershell
-smart-search search "today's important AI news" --validation balanced --extra-sources 2 --format json
+smart-search search "today's important AI news" --capabilities web_search --validation balanced --extra-sources 2 --format json
 ```
 
 4. Inspect intent routing without running providers:
@@ -450,7 +452,7 @@ Writing is synchronous under a cross-process lock bounded to 0.5 seconds. The lo
 Useful examples:
 
 ```powershell
-smart-search search "query" --validation balanced --extra-sources 3 --timeout 180 --format json --output result.json
+smart-search search "query" --capabilities none --validation balanced --extra-sources 3 --timeout 180 --format json --output result.json
 smart-search route "React useEffect API docs" --format markdown
 smart-search route-calibrate --models "Qwen/Qwen3-Embedding-8B" --format markdown
 smart-search research "query" --budget deep --fallback auto --format json --output research.json

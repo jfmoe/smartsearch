@@ -21,6 +21,7 @@ async def test_mock_smoke_passes():
     assert result["failed_cases"] == []
     assert any(case["name"] == "docs_search fallback context7_to_exa" for case in result["cases"])
     assert any(case["name"] == "deep_research explicit planner simple current prompt uses capability plan" for case in result["cases"])
+    assert any(case["name"] == "ordinary search declares complete capabilities in first invocation" for case in result["cases"])
     assert result["anysearch_operations"]["enabled"] is False
     assert {item["status"] for item in result["anysearch_operations"]["operations"].values()} == {"passed"}
     assert any(case["name"] == "AnySearch Provider Acceptance Operations offline contract" for case in result["cases"])
@@ -32,6 +33,7 @@ async def test_mock_smoke_covers_deep_research_capability_matrix():
     case_names = {case["name"] for case in result["cases"]}
 
     expected = {
+        "ordinary search declares complete capabilities in first invocation",
         "deep_research explicit planner simple current prompt uses capability plan",
         "deep_research docs api prompt uses docs capabilities",
         "deep_research claim verification requires fetch_before_claim",

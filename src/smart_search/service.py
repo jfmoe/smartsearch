@@ -31,7 +31,7 @@ from .intent_router import (
     _ordered_capabilities,
     _semantic_summary,
 )
-from .intent_catalog import CAPABILITY_IDS, calibration_cases, calibration_query_map, parse_caller_capabilities
+from .intent_catalog import CAPABILITY_IDS, calibration_cases, calibration_query_map, ordered_capabilities, parse_caller_capabilities
 from .logger import log_info
 from .providers.anysearch import (
     AnySearchProvider,
@@ -973,6 +973,16 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
         "breadth_depth_budget": budget,
     }
 
+    declared_capabilities = []
+    if docs_intent:
+        declared_capabilities.append("docs_search")
+    if recency_requirement != "none" or locale_domain_scope == "china" or cross_validation_need == "high":
+        declared_capabilities.append("web_search")
+    if known_url:
+        declared_capabilities.append("web_fetch")
+    normalized_capabilities = ordered_capabilities(declared_capabilities)
+    search_capability_declaration = ",".join(normalized_capabilities) if normalized_capabilities else "none"
+
     decomposition: list[dict[str, Any]] = []
     capability_plan: list[dict[str, Any]] = []
     steps: list[dict[str, str]] = []
@@ -985,7 +995,7 @@ def build_deep_research_plan(query: str, budget: str = "standard", evidence_dir:
         return f"{len(steps) + 1:02d}-{suffix}"
 
     def command_search(q: str, extra_sources: int = 2) -> str:
-        return f"smart-search search {_quote_arg(q)} --validation balanced --extra-sources {extra_sources} --format json --output {_quote_arg(_path_join(evidence_root, next_filename('search.json')))}"
+        return f"smart-search search {_quote_arg(q)} --capabilities {search_capability_declaration} --validation balanced --extra-sources {extra_sources} --format json --output {_quote_arg(_path_join(evidence_root, next_filename('search.json')))}"
 
     def command_exa(q: str) -> str:
         return f"smart-search exa-search {_quote_arg(q)} --num-results 5 --format json --output {_quote_arg(_path_join(evidence_root, next_filename('exa.json')))}"
@@ -4272,6 +4282,32 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
         "supplemental_paths": ["web_search"],
     }
     cases.append(_case("search sports current intent uses web reinforcement", sports_route["web_current_intent"], {"routing_decision": sports_route}))
+
+    ordinary_search_calls: list[dict[str, str]] = []
+
+    async def mock_ordinary_search(query: str, *, capabilities: str) -> dict[str, Any]:
+        ordinary_search_calls.append({"query": query, "capabilities": capabilities})
+        route_result = await IntentRouter(config).route(
+            query,
+            validation_level="fast",
+            allow_remote=True,
+            capabilities=capabilities,
+        )
+        return {"ok": True, "routing_decision": route_result.to_dict()}
+
+    ordinary_search_result = await mock_ordinary_search("plain query", capabilities="web_search")
+    ordinary_routing = ordinary_search_result["routing_decision"]
+    cases.append(
+        _case(
+            "ordinary search declares complete capabilities in first invocation",
+            ordinary_search_result["ok"]
+            and ordinary_search_calls == [{"query": "plain query", "capabilities": "web_search"}]
+            and ordinary_routing["required_capabilities"] == ["web_search"]
+            and ordinary_routing["intent_signals"]["caller_capabilities"] == ["web_search"]
+            and ordinary_routing["router_engines_used"] == ["rules", "caller"],
+            {"calls": ordinary_search_calls, "result": ordinary_search_result},
+        )
+    )
 
     strict_attempts = [_attempt("main_search", "xAI Responses", "ok", time.time(), result_count=1)]
     strict_sources: list[dict[str, Any]] = []

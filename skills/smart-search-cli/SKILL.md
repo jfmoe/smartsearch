@@ -15,8 +15,8 @@ Select the first branch whose condition matches the user's task. Load only the c
 
 **Choose this branch when:** the user wants web research, current information, X/Twitter search, documentation, a known URL fetched, or Deep Research, and no Smart Search failure is currently blocking the work.
 
-1. Select the required capability before selecting a provider: broad or current discovery, documentation search, known-URL fetch, experimental vertical search, or Deep Research orchestration. Read `references/provider-routing.md` for capability boundaries.
-2. Run the matching `smart-search` command. Read `references/command-patterns.md` for evidence-oriented commands and timeout recovery, `references/deep-research-mode.md` only for an explicit deep/multi-source request, and `references/cli-core.md` only when exact syntax or output fields matter.
+1. Choose ordinary search or the live Deep Research evidence workflow. For ordinary search, read `references/intent-routing-capabilities.md` and decide the complete capability set; use `none` when the set is empty. For live Deep Research, use `research` and keep its separate plan → discover → fetch/read → gap check → evidence-only synthesis workflow.
+2. Run ordinary search first as `smart-search search QUERY --capabilities CSV_OR_NONE ...`; the command itself is complete when the declaration includes every selected capability in reference order, or exactly `none`. Use `smart-search route` only for an explicit routing diagnostic, so ordinary search begins with `search`. Run `smart-search research ...` without a capability declaration. Read `references/provider-routing.md` for provider boundaries, `references/command-patterns.md` for evidence-oriented commands and timeout recovery, `references/deep-research-mode.md` only for an explicit deep/multi-source request, and `references/cli-core.md` only when exact syntax or output fields matter.
 
 **Completion criterion:** the CLI returns the requested output successfully, and any claim-level evidence required by the request comes from fetched page content rather than discovery candidates alone.
 
