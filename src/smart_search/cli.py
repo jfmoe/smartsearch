@@ -1519,6 +1519,9 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
     def has(key: str) -> bool:
         return bool(values.get(key))
 
+    def has_pool(single_key: str, keys_key: str) -> bool:
+        return has(single_key) or has(keys_key)
+
     main_configured: set[str] = set()
     if has("XAI_API_KEY"):
         main_configured.add("xai-responses")
@@ -1536,8 +1539,8 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
                 for provider, configured in [
                     ("zhipu", has("ZHIPU_API_KEY")),
                     ("zhipu-mcp", has("ZHIPU_MCP_API_KEY")),
-                    ("tavily", has("TAVILY_API_KEY")),
-                    ("firecrawl", has("FIRECRAWL_API_KEY")),
+                    ("tavily", has_pool("TAVILY_API_KEY", "TAVILY_API_KEYS")),
+                    ("firecrawl", has_pool("FIRECRAWL_API_KEY", "FIRECRAWL_API_KEYS")),
                 ]
                 if configured
             ],
@@ -1547,8 +1550,8 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
             "configured": [
                 provider
                 for provider, configured in [
-                    ("context7", has("CONTEXT7_API_KEY")),
-                    ("exa", has("EXA_API_KEY")),
+                    ("context7", has_pool("CONTEXT7_API_KEY", "CONTEXT7_API_KEYS")),
+                    ("exa", has_pool("EXA_API_KEY", "EXA_API_KEYS")),
                 ]
                 if configured
             ],
@@ -1558,17 +1561,17 @@ def _setup_status_from_values(values: dict[str, str]) -> dict[str, Any]:
             "configured": [
                 provider
                 for provider, configured in [
-                    ("tavily", has("TAVILY_API_KEY")),
-                    ("jina", has("JINA_API_KEY") or has("JINA_API_KEYS")),
+                    ("tavily", has_pool("TAVILY_API_KEY", "TAVILY_API_KEYS")),
+                    ("jina", has_pool("JINA_API_KEY", "JINA_API_KEYS")),
                     ("zhipu-mcp-reader", has("ZHIPU_MCP_API_KEY")),
-                    ("firecrawl", has("FIRECRAWL_API_KEY")),
+                    ("firecrawl", has_pool("FIRECRAWL_API_KEY", "FIRECRAWL_API_KEYS")),
                 ]
                 if configured
             ],
             "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
         },
         "vertical_search": {
-            "configured": ["anysearch"] if has("ANYSEARCH_API_KEY") else [],
+            "configured": ["anysearch"] if has_pool("ANYSEARCH_API_KEY", "ANYSEARCH_API_KEYS") else [],
             "fallback_chain": ["anysearch"],
             "experimental": True,
         },
@@ -1640,6 +1643,42 @@ def _prompt_value(key: str, label: str, current: str = "", optional: bool = Fals
         _write_stderr(prompt)
         value = input("").strip()
     return value or current
+
+
+def _prompt_provider_credentials(
+    values: dict[str, str],
+    current: dict[str, str],
+    *,
+    single_key: str,
+    keys_key: str,
+    label: str,
+    lang: str,
+) -> None:
+    """Prompt a single key or whole JSON array for Provider Credential Pool members.
+
+    Input starting with '[' is stored as KEYS (multi-credential round-robin);
+    otherwise it is stored as the single KEY. Whole-array management only—no
+    add/remove subcommands.
+    """
+    current_keys = current.get(keys_key, "")
+    current_single = current.get(single_key, "")
+    current_display = current_keys or current_single
+    raw = _prompt_value(
+        single_key,
+        _t(
+            lang,
+            f"{label}（单 key，或 JSON 数组启用多凭据轮询）",
+            f"{label} (single key, or JSON array for multi-credential rotation)",
+        ),
+        current_display,
+        lang=lang,
+    )
+    if not raw:
+        return
+    if raw.lstrip().startswith("["):
+        values[keys_key] = raw
+    else:
+        values[single_key] = raw
 
 
 def _ascii_choice_values(choices: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1880,19 +1919,33 @@ def _prompt_docs_search(values: dict[str, str], current: dict[str, str], lang: s
         lang,
     )
     if "exa" in selected:
-        values["EXA_API_KEY"] = _prompt_value("EXA_API_KEY", "Exa API key", current.get("EXA_API_KEY", ""), lang=lang)
+        _prompt_provider_credentials(
+            values,
+            current,
+            single_key="EXA_API_KEY",
+            keys_key="EXA_API_KEYS",
+            label="Exa API key",
+            lang=lang,
+        )
     if "context7" in selected:
-        values["CONTEXT7_API_KEY"] = _prompt_value(
-            "CONTEXT7_API_KEY",
-            "Context7 API key",
-            current.get("CONTEXT7_API_KEY", ""),
+        _prompt_provider_credentials(
+            values,
+            current,
+            single_key="CONTEXT7_API_KEY",
+            keys_key="CONTEXT7_API_KEYS",
+            label="Context7 API key",
             lang=lang,
         )
 
 
 def _prompt_tavily_api_url(values: dict[str, str], current: dict[str, str], lang: str) -> None:
     current_url = current.get("TAVILY_API_URL", "")
-    tavily_key = values.get("TAVILY_API_KEY") or current.get("TAVILY_API_KEY", "")
+    tavily_key = (
+        values.get("TAVILY_API_KEY")
+        or current.get("TAVILY_API_KEY", "")
+        or values.get("TAVILY_API_KEYS")
+        or current.get("TAVILY_API_KEYS", "")
+    )
     if current_url:
         default_choice = "current"
     elif _is_tavily_hikari_key(tavily_key):
@@ -2069,10 +2122,24 @@ def _prompt_web_fetch(values: dict[str, str], current: dict[str, str], lang: str
         lang,
     )
     if "tavily" in selected:
-        values["TAVILY_API_KEY"] = _prompt_value("TAVILY_API_KEY", "Tavily API key", current.get("TAVILY_API_KEY", ""), lang=lang)
+        _prompt_provider_credentials(
+            values,
+            current,
+            single_key="TAVILY_API_KEY",
+            keys_key="TAVILY_API_KEYS",
+            label="Tavily API key",
+            lang=lang,
+        )
         _prompt_tavily_api_url(values, current, lang)
     if "jina" in selected:
-        values["JINA_API_KEY"] = _prompt_value("JINA_API_KEY", "Jina API key", current.get("JINA_API_KEY", ""), lang=lang)
+        _prompt_provider_credentials(
+            values,
+            current,
+            single_key="JINA_API_KEY",
+            keys_key="JINA_API_KEYS",
+            label="Jina API key",
+            lang=lang,
+        )
         raw_url = _prompt_value(
             "JINA_READER_API_URL",
             "Jina Reader API URL",
@@ -2082,10 +2149,12 @@ def _prompt_web_fetch(values: dict[str, str], current: dict[str, str], lang: str
         )
         values["JINA_READER_API_URL"] = _normalize_jina_reader_api_url(raw_url)
     if "firecrawl" in selected:
-        values["FIRECRAWL_API_KEY"] = _prompt_value(
-            "FIRECRAWL_API_KEY",
-            "Firecrawl API key",
-            current.get("FIRECRAWL_API_KEY", ""),
+        _prompt_provider_credentials(
+            values,
+            current,
+            single_key="FIRECRAWL_API_KEY",
+            keys_key="FIRECRAWL_API_KEYS",
+            label="Firecrawl API key",
             lang=lang,
         )
         _prompt_firecrawl_api_url(values, current, lang)
@@ -2362,7 +2431,9 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
         ("INTENT_CLASSIFIER_MODEL", "Intent classifier model", True),
         ("INTENT_ROUTER_TIMEOUT_SECONDS", "Intent router timeout seconds", True),
         ("EXA_API_KEY", "Exa API key", True),
+        ("EXA_API_KEYS", "Exa API keys JSON array (multi-credential rotation)", True),
         ("CONTEXT7_API_KEY", "Context7 API key", True),
+        ("CONTEXT7_API_KEYS", "Context7 API keys JSON array (multi-credential rotation)", True),
         ("CONTEXT7_MCP_API_URL", "Context7 Remote MCP URL", True),
         ("ZHIPU_API_KEY", "Zhipu API key", True),
         ("ZHIPU_API_URL", "Zhipu Web Search API URL", True),
@@ -2373,19 +2444,23 @@ def _run_advanced_setup_prompts(values: dict[str, str], current: dict[str, str],
         ("ZHIPU_MCP_ZREAD_API_URL", "Zhipu Coding Plan zread MCP URL", True),
         ("ZHIPU_MCP_TIMEOUT_SECONDS", "Zhipu Coding Plan MCP timeout seconds", True),
         ("JINA_API_KEY", "Jina API key", True),
+        ("JINA_API_KEYS", "Jina API keys JSON array (multi-credential rotation)", True),
         ("JINA_READER_API_URL", "Jina Reader API URL", True),
         ("JINA_RESPOND_WITH", "Jina respond-with mode (optional, e.g. readerlm-v2)", True),
         ("JINA_TIMEOUT_SECONDS", "Jina timeout seconds", True),
         ("TAVILY_API_URL", "Tavily API URL", True),
         ("TAVILY_API_KEY", "Tavily API key", True),
+        ("TAVILY_API_KEYS", "Tavily API keys JSON array (multi-credential rotation)", True),
         ("FIRECRAWL_API_URL", "Firecrawl API URL", True),
         ("FIRECRAWL_API_KEY", "Firecrawl API key", True),
+        ("FIRECRAWL_API_KEYS", "Firecrawl API keys JSON array (multi-credential rotation)", True),
         ("ANYSEARCH_API_URL", "AnySearch MCP API URL", True),
         ("ANYSEARCH_API_KEY", "AnySearch API key", True),
+        ("ANYSEARCH_API_KEYS", "AnySearch API keys JSON array (multi-credential rotation)", True),
         ("ANYSEARCH_TIMEOUT_SECONDS", "AnySearch timeout seconds", True),
     ]
     for key, label, optional in prompts:
-        if values[key]:
+        if values.get(key):
             continue
         value = _prompt_value(key, label, current.get(key, ""), optional=optional, lang=lang)
         if key == "TAVILY_API_URL":
@@ -2688,8 +2763,6 @@ def _run_setup(args: argparse.Namespace) -> int:
         "INTENT_CLASSIFIER_API_KEY": args.intent_classifier_api_key,
         "INTENT_CLASSIFIER_MODEL": args.intent_classifier_model,
         "INTENT_ROUTER_TIMEOUT_SECONDS": args.intent_router_timeout,
-        "EXA_API_KEY": args.exa_key,
-        "CONTEXT7_API_KEY": args.context7_key,
         "CONTEXT7_MCP_API_URL": _normalize_custom_base_url(args.context7_mcp_api_url),
         "ZHIPU_API_KEY": args.zhipu_key,
         "ZHIPU_API_URL": _normalize_zhipu_api_url(args.zhipu_api_url),
@@ -2699,18 +2772,30 @@ def _run_setup(args: argparse.Namespace) -> int:
         "ZHIPU_MCP_READER_API_URL": _normalize_custom_base_url(args.zhipu_mcp_reader_api_url),
         "ZHIPU_MCP_ZREAD_API_URL": _normalize_custom_base_url(args.zhipu_mcp_zread_api_url),
         "ZHIPU_MCP_TIMEOUT_SECONDS": args.zhipu_mcp_timeout,
-        "JINA_API_KEY": args.jina_key,
         "JINA_READER_API_URL": _normalize_jina_reader_api_url(args.jina_reader_api_url),
         "JINA_RESPOND_WITH": args.jina_respond_with,
         "JINA_TIMEOUT_SECONDS": args.jina_timeout,
         "TAVILY_API_URL": _normalize_tavily_flag_api_url(args.tavily_api_url, args.tavily_key),
-        "TAVILY_API_KEY": args.tavily_key,
         "FIRECRAWL_API_URL": _normalize_firecrawl_api_url(args.firecrawl_api_url),
-        "FIRECRAWL_API_KEY": args.firecrawl_key,
         "ANYSEARCH_API_URL": _normalize_custom_base_url(args.anysearch_api_url),
-        "ANYSEARCH_API_KEY": args.anysearch_key,
         "ANYSEARCH_TIMEOUT_SECONDS": args.anysearch_timeout,
     }
+    for single_key, keys_key, raw in (
+        ("EXA_API_KEY", "EXA_API_KEYS", args.exa_key),
+        ("CONTEXT7_API_KEY", "CONTEXT7_API_KEYS", args.context7_key),
+        ("JINA_API_KEY", "JINA_API_KEYS", args.jina_key),
+        ("TAVILY_API_KEY", "TAVILY_API_KEYS", args.tavily_key),
+        ("FIRECRAWL_API_KEY", "FIRECRAWL_API_KEYS", args.firecrawl_key),
+        ("ANYSEARCH_API_KEY", "ANYSEARCH_API_KEYS", args.anysearch_key),
+    ):
+        if not raw:
+            values[single_key] = ""
+            continue
+        if str(raw).lstrip().startswith("["):
+            values[keys_key] = raw
+            values[single_key] = ""
+        else:
+            values[single_key] = raw
 
     lang = args.lang if args.lang in {"zh", "en"} else "zh"
     setup_warnings: list[str] = []
@@ -3186,8 +3271,16 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--intent-classifier-api-key", default="", help="Save INTENT_CLASSIFIER_API_KEY.")
     setup_parser.add_argument("--intent-classifier-model", default="", help="Save INTENT_CLASSIFIER_MODEL.")
     setup_parser.add_argument("--intent-router-timeout", default="", help="Save INTENT_ROUTER_TIMEOUT_SECONDS.")
-    setup_parser.add_argument("--exa-key", default="", help="Save EXA_API_KEY.")
-    setup_parser.add_argument("--context7-key", default="", help="Save CONTEXT7_API_KEY.")
+    setup_parser.add_argument(
+        "--exa-key",
+        default="",
+        help="Save EXA_API_KEY, or a JSON array string for EXA_API_KEYS multi-credential rotation.",
+    )
+    setup_parser.add_argument(
+        "--context7-key",
+        default="",
+        help="Save CONTEXT7_API_KEY, or a JSON array string for CONTEXT7_API_KEYS multi-credential rotation.",
+    )
     setup_parser.add_argument("--context7-mcp-api-url", default="", help="Save CONTEXT7_MCP_API_URL.")
     setup_parser.add_argument("--zhipu-key", default="", help="Save ZHIPU_API_KEY.")
     setup_parser.add_argument("--zhipu-api-url", default="", help="Save ZHIPU_API_URL.")
@@ -3197,16 +3290,32 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument("--zhipu-mcp-reader-api-url", default="", help="Save ZHIPU_MCP_READER_API_URL.")
     setup_parser.add_argument("--zhipu-mcp-zread-api-url", default="", help="Save ZHIPU_MCP_ZREAD_API_URL.")
     setup_parser.add_argument("--zhipu-mcp-timeout", default="", help="Save ZHIPU_MCP_TIMEOUT_SECONDS.")
-    setup_parser.add_argument("--jina-key", default="", help="Save JINA_API_KEY.")
+    setup_parser.add_argument(
+        "--jina-key",
+        default="",
+        help="Save JINA_API_KEY, or a JSON array string for JINA_API_KEYS multi-credential rotation.",
+    )
     setup_parser.add_argument("--jina-reader-api-url", default="", help="Save JINA_READER_API_URL.")
     setup_parser.add_argument("--jina-respond-with", default="", help="Save JINA_RESPOND_WITH, e.g. readerlm-v2.")
     setup_parser.add_argument("--jina-timeout", default="", help="Save JINA_TIMEOUT_SECONDS.")
     setup_parser.add_argument("--tavily-api-url", default="", help="Save TAVILY_API_URL.")
-    setup_parser.add_argument("--tavily-key", default="", help="Save TAVILY_API_KEY.")
+    setup_parser.add_argument(
+        "--tavily-key",
+        default="",
+        help="Save TAVILY_API_KEY, or a JSON array string for TAVILY_API_KEYS multi-credential rotation.",
+    )
     setup_parser.add_argument("--firecrawl-api-url", default="", help="Save FIRECRAWL_API_URL.")
-    setup_parser.add_argument("--firecrawl-key", default="", help="Save FIRECRAWL_API_KEY.")
+    setup_parser.add_argument(
+        "--firecrawl-key",
+        default="",
+        help="Save FIRECRAWL_API_KEY, or a JSON array string for FIRECRAWL_API_KEYS multi-credential rotation.",
+    )
     setup_parser.add_argument("--anysearch-api-url", default="", help="Save ANYSEARCH_API_URL.")
-    setup_parser.add_argument("--anysearch-key", default="", help="Save ANYSEARCH_API_KEY.")
+    setup_parser.add_argument(
+        "--anysearch-key",
+        default="",
+        help="Save ANYSEARCH_API_KEY, or a JSON array string for ANYSEARCH_API_KEYS multi-credential rotation.",
+    )
     setup_parser.add_argument("--anysearch-timeout", default="", help="Save ANYSEARCH_TIMEOUT_SECONDS.")
     _add_format_args(setup_parser)
 

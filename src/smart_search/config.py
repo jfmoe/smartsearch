@@ -52,9 +52,11 @@ class Config:
         "INTENT_CLASSIFIER_MODEL",
         "INTENT_ROUTER_TIMEOUT_SECONDS",
         "EXA_API_KEY",
+        "EXA_API_KEYS",
         "EXA_BASE_URL",
         "EXA_TIMEOUT_SECONDS",
         "CONTEXT7_API_KEY",
+        "CONTEXT7_API_KEYS",
         "CONTEXT7_MCP_API_URL",
         "CONTEXT7_TIMEOUT_SECONDS",
         "ZHIPU_API_KEY",
@@ -72,12 +74,15 @@ class Config:
         "JINA_RESPOND_WITH",
         "JINA_TIMEOUT_SECONDS",
         "TAVILY_API_KEY",
+        "TAVILY_API_KEYS",
         "TAVILY_API_URL",
         "TAVILY_ENABLED",
         "TAVILY_TIMEOUT_SECONDS",
         "FIRECRAWL_API_KEY",
+        "FIRECRAWL_API_KEYS",
         "FIRECRAWL_API_URL",
         "ANYSEARCH_API_KEY",
+        "ANYSEARCH_API_KEYS",
         "ANYSEARCH_API_URL",
         "ANYSEARCH_TIMEOUT_SECONDS",
         "SMART_SEARCH_DEBUG",
@@ -603,6 +608,9 @@ class Config:
     def tavily_api_key(self) -> str | None:
         return self._get_config_value("TAVILY_API_KEY")
 
+    def tavily_has_credentials(self) -> bool:
+        return self.provider_has_credentials("tavily")
+
     @property
     def tavily_timeout(self) -> float:
         return float(self._get_config_value("TAVILY_TIMEOUT_SECONDS", "30") or "30")
@@ -615,6 +623,9 @@ class Config:
     def firecrawl_api_key(self) -> str | None:
         return self._get_config_value("FIRECRAWL_API_KEY")
 
+    def firecrawl_has_credentials(self) -> bool:
+        return self.provider_has_credentials("firecrawl")
+
     @property
     def anysearch_api_url(self) -> str:
         return self._get_config_value("ANYSEARCH_API_URL", "https://api.anysearch.com/mcp") or "https://api.anysearch.com/mcp"
@@ -622,6 +633,9 @@ class Config:
     @property
     def anysearch_api_key(self) -> str | None:
         return self._get_config_value("ANYSEARCH_API_KEY")
+
+    def anysearch_has_credentials(self) -> bool:
+        return self.provider_has_credentials("anysearch")
 
     @property
     def anysearch_timeout(self) -> float:
@@ -737,6 +751,9 @@ class Config:
     def exa_api_key(self) -> str | None:
         return self._get_config_value("EXA_API_KEY")
 
+    def exa_has_credentials(self) -> bool:
+        return self.provider_has_credentials("exa")
+
     @property
     def exa_base_url(self) -> str:
         return self._get_config_value("EXA_BASE_URL", "https://api.exa.ai") or "https://api.exa.ai"
@@ -748,6 +765,9 @@ class Config:
     @property
     def context7_api_key(self) -> str | None:
         return self._get_config_value("CONTEXT7_API_KEY")
+
+    def context7_has_credentials(self) -> bool:
+        return self.provider_has_credentials("context7")
 
     @property
     def context7_mcp_api_url(self) -> str:
@@ -820,31 +840,50 @@ class Config:
     def jina_api_keys_raw(self) -> str | None:
         return self._get_config_value("JINA_API_KEYS")
 
-    def jina_credentials(self) -> list[str]:
-        """Resolved Jina Provider Credential Pool (KEYS overrides KEY)."""
+    def provider_credentials(self, provider_id: str) -> list[str]:
+        """Resolved Provider Credential Pool for an allowlisted provider (KEYS overrides KEY)."""
         from .credential_pool import ProviderCredentialPool
 
-        return ProviderCredentialPool(self).resolve("jina")
+        return ProviderCredentialPool(self).resolve(provider_id)
 
-    def jina_has_credentials(self) -> bool:
-        from .credential_pool import CredentialPoolError
+    def provider_has_credentials(self, provider_id: str) -> bool:
+        from .credential_pool import CredentialPoolError, PROVIDER_CREDENTIAL_KEYS
 
         try:
-            return bool(self.jina_credentials())
+            return bool(self.provider_credentials(provider_id))
         except CredentialPoolError:
+            mapping = PROVIDER_CREDENTIAL_KEYS.get(provider_id)
+            if mapping is None:
+                return False
+            keys_name, key_name = mapping
             # Invalid KEYS JSON is a configuration error, not "unconfigured".
-            return bool((self.jina_api_keys_raw or "").strip() or (self.jina_api_key or "").strip())
+            return bool(
+                (self._get_config_value(keys_name) or "").strip()
+                or (self._get_config_value(key_name) or "").strip()
+            )
 
-    def _jina_api_keys_display(self) -> str:
-        raw = self.jina_api_keys_raw
+    def provider_credential_pool_status(self, provider_id: str) -> dict:
+        from .credential_pool import ProviderCredentialPool
+
+        return ProviderCredentialPool(self).safe_status(provider_id)
+
+    def jina_credentials(self) -> list[str]:
+        return self.provider_credentials("jina")
+
+    def jina_has_credentials(self) -> bool:
+        return self.provider_has_credentials("jina")
+
+    def _api_keys_display(self, keys_config_key: str) -> str:
+        raw = self._get_config_value(keys_config_key)
         if not raw or not str(raw).strip():
             return "未配置"
         return self._mask_api_keys_value(str(raw))
 
-    def _jina_credential_pool_status(self) -> dict:
-        from .credential_pool import ProviderCredentialPool
+    def _jina_api_keys_display(self) -> str:
+        return self._api_keys_display("JINA_API_KEYS")
 
-        return ProviderCredentialPool(self).safe_status("jina")
+    def _jina_credential_pool_status(self) -> dict:
+        return self.provider_credential_pool_status("jina")
 
     @property
     def jina_reader_api_url(self) -> str:
@@ -960,11 +999,17 @@ class Config:
             "TAVILY_API_URL": self.tavily_api_url,
             "TAVILY_ENABLED": self.tavily_enabled,
             "TAVILY_API_KEY": self._mask_api_key(self.tavily_api_key) if self.tavily_api_key else "未配置",
+            "TAVILY_API_KEYS": self._api_keys_display("TAVILY_API_KEYS"),
+            "tavily_credential_pool": self.provider_credential_pool_status("tavily"),
             "TAVILY_TIMEOUT_SECONDS": self.tavily_timeout,
             "FIRECRAWL_API_URL": self.firecrawl_api_url,
             "FIRECRAWL_API_KEY": self._mask_api_key(self.firecrawl_api_key) if self.firecrawl_api_key else "未配置",
+            "FIRECRAWL_API_KEYS": self._api_keys_display("FIRECRAWL_API_KEYS"),
+            "firecrawl_credential_pool": self.provider_credential_pool_status("firecrawl"),
             "ANYSEARCH_API_URL": self.anysearch_api_url,
             "ANYSEARCH_API_KEY": self._mask_api_key(self.anysearch_api_key) if self.anysearch_api_key else "未配置",
+            "ANYSEARCH_API_KEYS": self._api_keys_display("ANYSEARCH_API_KEYS"),
+            "anysearch_credential_pool": self.provider_credential_pool_status("anysearch"),
             "ANYSEARCH_TIMEOUT_SECONDS": self.anysearch_timeout,
             "SMART_SEARCH_OUTPUT_CLEANUP": self.output_cleanup_enabled,
             "SMART_SEARCH_LOG_TO_FILE": self.log_to_file_enabled,
@@ -972,9 +1017,13 @@ class Config:
             "SMART_SEARCH_RESULT_JOURNAL_RETENTION_DAYS": journal_retention_days,
             "SSL_VERIFY": self.ssl_verify_enabled,
             "EXA_API_KEY": self._mask_api_key(self.exa_api_key) if self.exa_api_key else "未配置",
+            "EXA_API_KEYS": self._api_keys_display("EXA_API_KEYS"),
+            "exa_credential_pool": self.provider_credential_pool_status("exa"),
             "EXA_BASE_URL": self.exa_base_url,
             "EXA_TIMEOUT_SECONDS": self.exa_timeout,
             "CONTEXT7_API_KEY": self._mask_api_key(self.context7_api_key) if self.context7_api_key else "未配置",
+            "CONTEXT7_API_KEYS": self._api_keys_display("CONTEXT7_API_KEYS"),
+            "context7_credential_pool": self.provider_credential_pool_status("context7"),
             "CONTEXT7_MCP_API_URL": self.context7_mcp_api_url,
             "CONTEXT7_TIMEOUT_SECONDS": self.context7_timeout,
             "context7_migration_required": self.context7_migration_required,

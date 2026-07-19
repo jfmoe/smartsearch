@@ -388,7 +388,8 @@ async def test_context7_provider_retries_retryable_http_but_not_protocol_or_tool
         async def post(self, endpoint, headers, json):
             calls.append(json["method"])
             if len(calls) == 1:
-                return httpx.Response(429, request=httpx.Request("POST", endpoint))
+                # 503 remains same-credential-retryable; 429 rotates via the credential pool.
+                return httpx.Response(503, request=httpx.Request("POST", endpoint))
             if json["method"] == "notifications/initialized":
                 return httpx.Response(202, request=httpx.Request("POST", endpoint))
             return httpx.Response(

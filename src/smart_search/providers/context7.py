@@ -11,7 +11,8 @@ from ..config import config
 from ..logger import log_info
 
 
-RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+# 429 is not same-credential-retried: Provider Credential Pool rotates immediately.
+RETRYABLE_STATUS_CODES = {408, 500, 502, 503, 504}
 MCP_PROTOCOL_VERSION = "2024-11-05"
 _REDIRECT_PATTERN = re.compile(r"redirect(?:ed)?\s+(?:to|target(?:\s+is)?)\s+`?(/[^\s`]+)", re.IGNORECASE)
 _LIBRARY_FIELD_PATTERN = re.compile(r"^- (?P<field>Title|Context7-compatible library ID|Description|Code Snippets|Trust Score|Benchmark Score):\s*(?P<value>.*)$", re.MULTILINE)
@@ -272,7 +273,28 @@ class Context7Provider(BaseSearchProvider):
         elif isinstance(error, httpx.TimeoutException):
             base.update({"error_type": "timeout", "error": "Context7 request timed out."})
         elif isinstance(error, httpx.HTTPStatusError):
-            base.update({"error_type": "network_error", "error": f"Context7 request failed (HTTP {error.response.status_code})."})
+            status_code = error.response.status_code
+            if status_code == 429:
+                base.update(
+                    {
+                        "error_type": "rate_limited",
+                        "error": f"Context7 request failed (HTTP {status_code}).",
+                    }
+                )
+            elif status_code in {401, 403}:
+                base.update(
+                    {
+                        "error_type": "auth_error",
+                        "error": f"Context7 request failed (HTTP {status_code}).",
+                    }
+                )
+            else:
+                base.update(
+                    {
+                        "error_type": "network_error",
+                        "error": f"Context7 request failed (HTTP {status_code}).",
+                    }
+                )
         elif isinstance(error, (httpx.NetworkError, httpx.ConnectError)):
             base.update({"error_type": "network_error", "error": "Context7 network request failed."})
         else:

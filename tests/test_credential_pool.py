@@ -73,6 +73,47 @@ def test_pool_resolve_rejects_non_allowlisted_provider(tmp_path):
         pool.resolve("xai-responses")
 
 
+@pytest.mark.parametrize(
+    ("provider_id", "keys_env", "key_env"),
+    [
+        ("exa", "EXA_API_KEYS", "EXA_API_KEY"),
+        ("tavily", "TAVILY_API_KEYS", "TAVILY_API_KEY"),
+        ("firecrawl", "FIRECRAWL_API_KEYS", "FIRECRAWL_API_KEY"),
+        ("context7", "CONTEXT7_API_KEYS", "CONTEXT7_API_KEY"),
+        ("anysearch", "ANYSEARCH_API_KEYS", "ANYSEARCH_API_KEY"),
+    ],
+)
+def test_pool_resolve_allowlisted_providers_keys_override_key(
+    monkeypatch, tmp_path, provider_id, keys_env, key_env
+):
+    config = Config()
+    monkeypatch.setenv(keys_env, json.dumps(["pool-a", "pool-b"]))
+    monkeypatch.setenv(key_env, "single-ignored")
+    pool = _pool(tmp_path, config)
+    assert pool.resolve(provider_id) == ["pool-a", "pool-b"]
+
+
+def test_anysearch_keys_only_marks_configured_and_automatic_discovery(monkeypatch):
+    from smart_search import service
+
+    monkeypatch.setenv("ANYSEARCH_API_KEYS", json.dumps(["any-pool-key-aaaa"]))
+    monkeypatch.delenv("ANYSEARCH_API_KEY", raising=False)
+    assert service._provider_configured("anysearch") is True
+    status = service.get_capability_status()
+    assert status["vertical_search"]["configured"] == ["anysearch"]
+    assert status["vertical_search"]["automatic_vertical_discovery"] is True
+
+
+def test_exa_keys_only_marks_docs_search_configured(monkeypatch):
+    from smart_search import service
+
+    monkeypatch.setenv("EXA_API_KEYS", json.dumps(["exa-pool-key-bbbb"]))
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    assert service._provider_configured("exa") is True
+    status = service.get_capability_status()
+    assert "exa" in status["docs_search"]["configured"]
+
+
 # --- claim / advance ---
 
 
@@ -340,3 +381,178 @@ async def test_jina_invalid_keys_json_fail_closed_does_not_use_single_key(monkey
     assert "JINA_API_KEYS" in data["error"] or "JSON" in data["error"]
     assert FakeJinaClient.calls == []
     assert "solo-should-not-be-used" not in json.dumps(data)
+
+
+@pytest.mark.asyncio
+async def test_exa_search_rotates_on_rate_limited_with_pool(monkeypatch, tmp_path):
+    from smart_search import service
+
+    calls: list[str] = []
+
+    class FakeExa:
+        def __init__(self, api_url, api_key, timeout=30.0):
+            self.api_key = api_key
+
+        async def search(self, **kwargs):
+            calls.append(self.api_key)
+            if self.api_key == "exa-first":
+                return json.dumps(
+                    {"ok": False, "error_type": "rate_limited", "error": "HTTP 429"}
+                )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "query": kwargs.get("query", ""),
+                    "results": [{"title": "ok", "url": "https://example.com"}],
+                    "total": 1,
+                }
+            )
+
+    monkeypatch.setattr(service, "ExaSearchProvider", FakeExa)
+    monkeypatch.setenv("EXA_API_KEYS", json.dumps(["exa-first", "exa-second"]))
+
+    data = await service.exa_search("docs query", num_results=1)
+    assert data["ok"] is True
+    assert data.get("credential_rotated") is True
+    assert data.get("key_index") == 1
+    assert calls == ["exa-first", "exa-second"]
+    assert "exa-first" not in json.dumps(data)
+    assert "exa-second" not in json.dumps(data)
+
+
+@pytest.mark.asyncio
+async def test_tavily_extract_rotates_on_429(monkeypatch):
+    from smart_search import service
+
+    class FakeClient:
+        calls = []
+        responses = []
+
+        def __init__(self, timeout=None, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            self.__class__.calls.append(headers.get("Authorization", ""))
+            item = self.__class__.responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    FakeClient.calls = []
+    req = httpx.Request("POST", "https://api.tavily.com/extract")
+    FakeClient.responses = [
+        httpx.Response(429, text="rate limited", request=req),
+        httpx.Response(
+            200,
+            json={"results": [{"raw_content": "tavily pool content"}]},
+            request=req,
+        ),
+    ]
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setenv("TAVILY_API_KEYS", json.dumps(["tav-a", "tav-b"]))
+
+    content = await service.call_tavily_extract("https://example.com")
+    assert content == "tavily pool content"
+    assert FakeClient.calls == ["Bearer tav-a", "Bearer tav-b"]
+
+
+@pytest.mark.asyncio
+async def test_firecrawl_search_rotates_on_429(monkeypatch):
+    from smart_search import service
+
+    class FakeClient:
+        calls = []
+        responses = []
+
+        def __init__(self, timeout=None, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            self.__class__.calls.append(headers.get("Authorization", ""))
+            item = self.__class__.responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    FakeClient.calls = []
+    req = httpx.Request("POST", "https://api.firecrawl.dev/v2/search")
+    FakeClient.responses = [
+        httpx.Response(429, text="rate limited", request=req),
+        httpx.Response(
+            200,
+            json={"data": {"web": [{"title": "ok", "url": "https://example.com", "description": "d"}]}},
+            request=req,
+        ),
+    ]
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setenv("FIRECRAWL_API_KEYS", json.dumps(["fc-a", "fc-b"]))
+
+    results = await service.call_firecrawl_search("q", limit=1)
+    assert results and results[0]["url"] == "https://example.com"
+    assert FakeClient.calls == ["Bearer fc-a", "Bearer fc-b"]
+
+
+@pytest.mark.asyncio
+async def test_context7_library_rotates_on_rate_limited(monkeypatch):
+    from smart_search import service
+
+    calls: list[str] = []
+
+    class FakeContext7:
+        def __init__(self, api_url, api_key, timeout=30.0):
+            self.api_key = api_key
+
+        async def library(self, name, query=""):
+            calls.append(self.api_key)
+            if self.api_key == "c7-first":
+                return json.dumps(
+                    {"ok": False, "error_type": "rate_limited", "error": "HTTP 429"}
+                )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "results": [{"id": "/org/lib", "title": "Lib"}],
+                    "provider": "context7",
+                }
+            )
+
+    monkeypatch.setattr(service, "Context7Provider", FakeContext7)
+    monkeypatch.setenv("CONTEXT7_API_KEYS", json.dumps(["c7-first", "c7-second"]))
+
+    data = await service.context7_library("react")
+    assert data["ok"] is True
+    assert data.get("credential_rotated") is True
+    assert calls == ["c7-first", "c7-second"]
+
+
+def test_config_masks_all_allowlisted_keys_arrays(monkeypatch):
+    config = Config()
+    secret = "pool-secret-key-zzzz"
+    for keys_name in (
+        "EXA_API_KEYS",
+        "TAVILY_API_KEYS",
+        "FIRECRAWL_API_KEYS",
+        "CONTEXT7_API_KEYS",
+        "ANYSEARCH_API_KEYS",
+    ):
+        config.set_config_value(keys_name, json.dumps([secret]))
+    info = config.get_config_info()
+    dumped = json.dumps(info)
+    assert secret not in dumped
+    assert info["exa_credential_pool"]["key_count"] == 1
+    assert info["tavily_credential_pool"]["key_count"] == 1
+    assert info["firecrawl_credential_pool"]["key_count"] == 1
+    assert info["context7_credential_pool"]["key_count"] == 1
+    assert info["anysearch_credential_pool"]["key_count"] == 1

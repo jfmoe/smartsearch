@@ -528,7 +528,8 @@ def test_research_provider_profiles_are_registered_with_capability_boundaries():
     assert "known URL extraction" in profiles["jina"]["route_reasons"]
     assert profiles["anysearch"]["experimental"] is True
     assert profiles["anysearch"]["automatic_domain_search"] is False
-    assert profiles["anysearch"]["automatic_vertical_discovery_requires"] == "ANYSEARCH_API_KEY"
+    assert "ANYSEARCH_API_KEY" in profiles["anysearch"]["automatic_vertical_discovery_requires"]
+    assert "ANYSEARCH_API_KEYS" in profiles["anysearch"]["automatic_vertical_discovery_requires"]
     assert profiles["anysearch"]["verified_domains"] == []
     assert profiles["anysearch"]["acceptance_operations"] == [
         "Domain Discovery",

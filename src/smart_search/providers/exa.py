@@ -10,7 +10,8 @@ from ..config import config
 from ..logger import log_info
 
 
-RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+# 429 is not same-credential-retried: Provider Credential Pool rotates immediately.
+RETRYABLE_STATUS_CODES = {408, 500, 502, 503, 504}
 
 
 def _is_retryable_exception(exc) -> bool:

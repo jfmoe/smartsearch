@@ -285,7 +285,7 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
             "AnySearch Extraction",
         ],
         "anonymous_explicit_operations": True,
-        "automatic_vertical_discovery_requires": "ANYSEARCH_API_KEY",
+        "automatic_vertical_discovery_requires": "ANYSEARCH_API_KEY or ANYSEARCH_API_KEYS",
         "automatic_domain_search": False,
         "experimental": True,
     },
@@ -395,6 +395,45 @@ def _credential_pool_attempt_extra(data: dict[str, Any] | None) -> dict[str, Any
     if data.get("credential_rotated"):
         extra["credential_rotated"] = True
     return extra or None
+
+
+async def _run_with_credential_pool(
+    provider_id: str,
+    attempt_fn,
+    *,
+    unconfigured_message: str,
+) -> dict[str, Any]:
+    """Resolve credentials and execute one provider call with rate-limit rotation."""
+    from .credential_pool import CredentialPoolError, ProviderCredentialPool
+
+    pool = ProviderCredentialPool(config)
+    try:
+        credentials = pool.resolve(provider_id)
+    except CredentialPoolError as error:
+        return {
+            "ok": False,
+            "provider": provider_id,
+            "error_type": "config_error",
+            "error": str(error),
+        }
+    if not credentials:
+        return {
+            "ok": False,
+            "provider": provider_id,
+            "error_type": "config_error",
+            "error": unconfigured_message,
+        }
+    return await pool.execute_with_rotation(provider_id, attempt_fn, credentials=credentials)
+
+
+def _http_status_error_type(status_code: int) -> str:
+    if status_code in {401, 403}:
+        return "auth_error"
+    if status_code == 429:
+        return "rate_limited"
+    if status_code in {400, 422}:
+        return "parameter_error"
+    return "network_error"
 
 
 def _openai_model_breaker_key(api_url: str, model: str) -> tuple[str, str]:
@@ -607,23 +646,23 @@ def _provider_configured(provider: str) -> bool:
     if provider == "openai-compatible":
         return bool(config.openai_compatible_api_url and config.openai_compatible_api_key)
     if provider == "context7":
-        return bool(config.context7_api_key and not config.context7_migration_required)
+        return bool(config.context7_has_credentials() and not config.context7_migration_required)
     if provider == "exa":
-        return bool(config.exa_api_key)
+        return config.exa_has_credentials()
     if provider == "zhipu":
         return bool(config.zhipu_api_key)
     if provider == "zhipu-mcp":
         return bool(config.zhipu_mcp_api_key)
     if provider == "tavily":
-        return bool(config.tavily_api_key)
+        return config.tavily_has_credentials()
     if provider == "jina":
         return config.jina_has_credentials()
     if provider == "zhipu-mcp-reader":
         return bool(config.zhipu_mcp_api_key)
     if provider == "firecrawl":
-        return bool(config.firecrawl_api_key)
+        return config.firecrawl_has_credentials()
     if provider == "anysearch":
-        return bool(config.anysearch_api_key)
+        return config.anysearch_has_credentials()
     if provider == "main-search":
         return bool(config.xai_api_key or (config.openai_compatible_api_url and config.openai_compatible_api_key))
     return False
@@ -1505,8 +1544,8 @@ def get_capability_status() -> dict[str, Any]:
                 for name, enabled in [
                     ("zhipu", bool(config.zhipu_api_key)),
                     ("zhipu-mcp", bool(config.zhipu_mcp_api_key)),
-                    ("tavily", bool(config.tavily_api_key)),
-                    ("firecrawl", bool(config.firecrawl_api_key)),
+                    ("tavily", config.tavily_has_credentials()),
+                    ("firecrawl", config.firecrawl_has_credentials()),
                 ]
                 if enabled
             ],
@@ -1516,8 +1555,8 @@ def get_capability_status() -> dict[str, Any]:
             "configured": [
                 name
                 for name, enabled in [
-                    ("context7", bool(config.context7_api_key and not config.context7_migration_required)),
-                    ("exa", bool(config.exa_api_key)),
+                    ("context7", bool(config.context7_has_credentials() and not config.context7_migration_required)),
+                    ("exa", config.exa_has_credentials()),
                 ]
                 if enabled
             ],
@@ -1527,20 +1566,20 @@ def get_capability_status() -> dict[str, Any]:
             "configured": [
                 name
                 for name, enabled in [
-                    ("tavily", bool(config.tavily_api_key)),
+                    ("tavily", config.tavily_has_credentials()),
                     ("jina", config.jina_has_credentials()),
                     ("zhipu-mcp-reader", bool(config.zhipu_mcp_api_key)),
-                    ("firecrawl", bool(config.firecrawl_api_key)),
+                    ("firecrawl", config.firecrawl_has_credentials()),
                 ]
                 if enabled
             ],
             "fallback_chain": ["tavily", "jina", "zhipu-mcp-reader", "firecrawl"],
         },
         "vertical_search": {
-            "configured": ["anysearch"] if config.anysearch_api_key else [],
+            "configured": ["anysearch"] if config.anysearch_has_credentials() else [],
             "fallback_chain": ["anysearch"],
             "experimental": True,
-            "automatic_vertical_discovery": bool(config.anysearch_api_key),
+            "automatic_vertical_discovery": bool(config.anysearch_has_credentials()),
             "operation_live": _anysearch_not_run_operations(),
             "verified_domains": [
                 f"{item['domain']}.{item['sub_domain']}" for item in anysearch_manifest["verified_domains"]
@@ -1628,9 +1667,23 @@ async def _run_anysearch_live_operations() -> dict[str, Any]:
     saved local configuration. Explicit CLI operations may still run anonymously;
     smoke must never do so implicitly.
     """
-    api_key = os.environ.get("ANYSEARCH_API_KEY", "").strip()
+    from .credential_pool import CredentialPoolError, resolve_credentials
+
+    try:
+        env_keys = resolve_credentials(
+            keys_raw=os.environ.get("ANYSEARCH_API_KEYS"),
+            key_raw=os.environ.get("ANYSEARCH_API_KEY"),
+            keys_config_key="ANYSEARCH_API_KEYS",
+        )
+    except CredentialPoolError as error:
+        return {
+            "enabled": False,
+            "operations": _anysearch_not_run_operations(error_type="config_error", error=str(error)),
+            "domain_results": [],
+        }
+    api_key = env_keys[0] if env_keys else ""
     if not api_key:
-        error = "Set ANYSEARCH_API_KEY in the environment to enable AnySearch live smoke."
+        error = "Set ANYSEARCH_API_KEY or ANYSEARCH_API_KEYS in the environment to enable AnySearch live smoke."
         return {
             "enabled": False,
             "operations": _anysearch_not_run_operations(error_type="config_error", error=error),
@@ -1934,13 +1987,13 @@ async def _run_web_fetch_fallback(
 ) -> tuple[dict[str, Any] | None, list[dict]]:
     attempts: list[dict] = []
     providers = []
-    if config.tavily_api_key:
+    if config.tavily_has_credentials():
         providers.append("tavily")
     if config.jina_has_credentials():
         providers.append("jina")
     if config.zhipu_mcp_api_key:
         providers.append("zhipu-mcp-reader")
-    if config.firecrawl_api_key:
+    if config.firecrawl_has_credentials():
         providers.append("firecrawl")
     if preferred_order:
         allowed = {provider for provider in providers}
@@ -2010,9 +2063,9 @@ async def _run_web_search_fallback(
         configured.append("zhipu")
     if config.zhipu_mcp_api_key:
         configured.append("zhipu-mcp")
-    if config.tavily_api_key:
+    if config.tavily_has_credentials():
         configured.append("tavily")
-    if config.firecrawl_api_key:
+    if config.firecrawl_has_credentials():
         configured.append("firecrawl")
     if provider_filter is not None:
         configured = [p for p in configured if p in provider_filter]
@@ -2067,9 +2120,9 @@ async def _run_docs_search_fallback(
     provider_filter = _parse_provider_filter(providers)
     attempts: list[dict] = []
     configured: list[str] = []
-    if config.context7_api_key:
+    if config.context7_has_credentials() and not config.context7_migration_required:
         configured.append("context7")
-    if config.exa_api_key:
+    if config.exa_has_credentials():
         configured.append("exa")
     if provider_filter is not None:
         configured = [p for p in configured if p in provider_filter]
@@ -2084,10 +2137,29 @@ async def _run_docs_search_fallback(
                 if data.get("ok"):
                     sources = _normalize_source_results(data.get("results"), "exa")
                     if sources:
-                        attempts.append(_attempt("docs_search", provider, "ok", start, result_count=len(sources)))
+                        attempts.append(
+                            _attempt(
+                                "docs_search",
+                                provider,
+                                "ok",
+                                start,
+                                result_count=len(sources),
+                                extra=_credential_pool_attempt_extra(data),
+                            )
+                        )
                         return sources, attempts
                 status = "error" if data.get("error_type") in {"auth_error", "parameter_error", "rate_limited", "timeout", "network_error", "runtime_error"} else "empty"
-                attempts.append(_attempt("docs_search", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                attempts.append(
+                    _attempt(
+                        "docs_search",
+                        provider,
+                        status,
+                        start,
+                        error_type=data.get("error_type", ""),
+                        error=data.get("error", ""),
+                        extra=_credential_pool_attempt_extra(data),
+                    )
+                )
             elif provider == "context7":
                 data = await context7_library(query, query)
                 if data.get("ok"):
@@ -2102,10 +2174,29 @@ async def _run_docs_search_fallback(
                         if item.get("id")
                     ]
                     if sources:
-                        attempts.append(_attempt("docs_search", provider, "ok", start, result_count=len(sources)))
+                        attempts.append(
+                            _attempt(
+                                "docs_search",
+                                provider,
+                                "ok",
+                                start,
+                                result_count=len(sources),
+                                extra=_credential_pool_attempt_extra(data),
+                            )
+                        )
                         return sources, attempts
-                status = "error" if data.get("error_type") in {"auth_error", "timeout", "network_error", "runtime_error"} else "empty"
-                attempts.append(_attempt("docs_search", provider, status, start, error_type=data.get("error_type", ""), error=data.get("error", "")))
+                status = "error" if data.get("error_type") in {"auth_error", "timeout", "network_error", "runtime_error", "rate_limited"} else "empty"
+                attempts.append(
+                    _attempt(
+                        "docs_search",
+                        provider,
+                        status,
+                        start,
+                        error_type=data.get("error_type", ""),
+                        error=data.get("error", ""),
+                        extra=_credential_pool_attempt_extra(data),
+                    )
+                )
         except Exception as e:
             attempts.append(_attempt("docs_search", provider, "error", start, error_type="runtime_error", error=str(e)))
     return [], attempts
@@ -2119,7 +2210,7 @@ async def _run_vertical_search_fallback(
     provider_filter = _parse_provider_filter(providers)
     attempts: list[dict] = []
     configured: list[str] = []
-    if config.anysearch_api_key:
+    if config.anysearch_has_credentials():
         configured.append("anysearch")
     if provider_filter is not None:
         configured = [p for p in configured if p in provider_filter]
@@ -2189,108 +2280,175 @@ async def _run_vertical_search_fallback(
 
 
 async def call_tavily_extract(url: str) -> str | None:
-    api_key = config.tavily_api_key
-    if not api_key:
-        return None
-    endpoint = f"{config.tavily_api_url.rstrip('/')}/extract"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {"urls": [url], "format": "markdown"}
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(endpoint, headers=headers, json=body)
-            response.raise_for_status()
-            data = response.json()
-            if data.get("results") and len(data["results"]) > 0:
-                content = data["results"][0].get("raw_content", "")
-                return content if content and content.strip() else None
-            return None
-    except Exception:
-        return None
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        endpoint = f"{config.tavily_api_url.rstrip('/')}/extract"
+        headers = {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}
+        body = {"urls": [url], "format": "markdown"}
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(endpoint, headers=headers, json=body)
+                response.raise_for_status()
+                data = response.json()
+                if data.get("results") and len(data["results"]) > 0:
+                    content = data["results"][0].get("raw_content", "")
+                    if content and content.strip():
+                        return {"ok": True, "content": content}
+                return {"ok": False, "error_type": "empty", "error": "empty extract"}
+        except httpx.HTTPStatusError as error:
+            return {
+                "ok": False,
+                "error_type": _http_status_error_type(error.response.status_code),
+                "error": f"HTTP {error.response.status_code}",
+            }
+        except httpx.TimeoutException:
+            return {"ok": False, "error_type": "timeout", "error": "request timed out"}
+        except Exception as error:
+            return {"ok": False, "error_type": "network_error", "error": str(error)}
+
+    data = await _run_with_credential_pool(
+        "tavily",
+        attempt,
+        unconfigured_message="TAVILY_API_KEY/TAVILY_API_KEYS 未配置。",
+    )
+    return data.get("content") if data.get("ok") else None
 
 
 async def call_tavily_search(query: str, max_results: int = 6) -> list[dict] | None:
-    api_key = config.tavily_api_key
-    if not api_key:
-        return None
-    endpoint = f"{config.tavily_api_url.rstrip('/')}/search"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {
-        "query": query,
-        "max_results": max_results,
-        "search_depth": "advanced",
-        "include_raw_content": False,
-        "include_answer": False,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(endpoint, headers=headers, json=body)
-            response.raise_for_status()
-            data = response.json()
-            results = data.get("results", [])
-            return [
-                {
-                    "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "content": r.get("content", ""),
-                    "score": r.get("score", 0),
-                }
-                for r in results
-            ] if results else None
-    except Exception:
-        return None
-
-
-async def call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | None:
-    api_key = config.firecrawl_api_key
-    if not api_key:
-        return None
-    endpoint = f"{config.firecrawl_api_url.rstrip('/')}/search"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {"query": query, "limit": limit}
-    try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            response = await client.post(endpoint, headers=headers, json=body)
-            response.raise_for_status()
-            data = response.json()
-            results = data.get("data", {}).get("web", [])
-            return [
-                {
-                    "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "description": r.get("description", ""),
-                }
-                for r in results
-            ] if results else None
-    except Exception:
-        return None
-
-
-async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
-    api_key = config.firecrawl_api_key
-    if not api_key:
-        return None
-    endpoint = f"{config.firecrawl_api_url.rstrip('/')}/scrape"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    for attempt in range(config.retry_max_attempts):
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        endpoint = f"{config.tavily_api_url.rstrip('/')}/search"
+        headers = {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}
         body = {
-            "url": url,
-            "formats": ["markdown"],
-            "timeout": 60000,
-            "waitFor": (attempt + 1) * 1500,
+            "query": query,
+            "max_results": max_results,
+            "search_depth": "advanced",
+            "include_raw_content": False,
+            "include_answer": False,
         }
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 response = await client.post(endpoint, headers=headers, json=body)
                 response.raise_for_status()
                 data = response.json()
-                markdown = data.get("data", {}).get("markdown", "")
-                if markdown and markdown.strip():
-                    return markdown
-                await log_info(ctx, f"Firecrawl: markdown为空, 重试 {attempt + 1}/{config.retry_max_attempts}", config.debug_enabled)
-        except Exception as e:
-            await log_info(ctx, f"Firecrawl error: {e}", config.debug_enabled)
-            return None
-    return None
+                results = data.get("results", [])
+                if not results:
+                    return {"ok": False, "error_type": "empty", "error": "empty search"}
+                return {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "content": r.get("content", ""),
+                            "score": r.get("score", 0),
+                        }
+                        for r in results
+                    ],
+                }
+        except httpx.HTTPStatusError as error:
+            return {
+                "ok": False,
+                "error_type": _http_status_error_type(error.response.status_code),
+                "error": f"HTTP {error.response.status_code}",
+            }
+        except httpx.TimeoutException:
+            return {"ok": False, "error_type": "timeout", "error": "request timed out"}
+        except Exception as error:
+            return {"ok": False, "error_type": "network_error", "error": str(error)}
+
+    data = await _run_with_credential_pool(
+        "tavily",
+        attempt,
+        unconfigured_message="TAVILY_API_KEY/TAVILY_API_KEYS 未配置。",
+    )
+    return data.get("results") if data.get("ok") else None
+
+
+async def call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | None:
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        endpoint = f"{config.firecrawl_api_url.rstrip('/')}/search"
+        headers = {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}
+        body = {"query": query, "limit": limit}
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                response = await client.post(endpoint, headers=headers, json=body)
+                response.raise_for_status()
+                data = response.json()
+                results = data.get("data", {}).get("web", [])
+                if not results:
+                    return {"ok": False, "error_type": "empty", "error": "empty search"}
+                return {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "description": r.get("description", ""),
+                        }
+                        for r in results
+                    ],
+                }
+        except httpx.HTTPStatusError as error:
+            return {
+                "ok": False,
+                "error_type": _http_status_error_type(error.response.status_code),
+                "error": f"HTTP {error.response.status_code}",
+            }
+        except httpx.TimeoutException:
+            return {"ok": False, "error_type": "timeout", "error": "request timed out"}
+        except Exception as error:
+            return {"ok": False, "error_type": "network_error", "error": str(error)}
+
+    data = await _run_with_credential_pool(
+        "firecrawl",
+        attempt,
+        unconfigured_message="FIRECRAWL_API_KEY/FIRECRAWL_API_KEYS 未配置。",
+    )
+    return data.get("results") if data.get("ok") else None
+
+
+async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        endpoint = f"{config.firecrawl_api_url.rstrip('/')}/scrape"
+        headers = {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}
+        for attempt_num in range(config.retry_max_attempts):
+            body = {
+                "url": url,
+                "formats": ["markdown"],
+                "timeout": 60000,
+                "waitFor": (attempt_num + 1) * 1500,
+            }
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    response = await client.post(endpoint, headers=headers, json=body)
+                    response.raise_for_status()
+                    data = response.json()
+                    markdown = data.get("data", {}).get("markdown", "")
+                    if markdown and markdown.strip():
+                        return {"ok": True, "content": markdown}
+                    await log_info(
+                        ctx,
+                        f"Firecrawl: markdown为空, 重试 {attempt_num + 1}/{config.retry_max_attempts}",
+                        config.debug_enabled,
+                    )
+            except httpx.HTTPStatusError as error:
+                status_code = error.response.status_code
+                error_type = _http_status_error_type(status_code)
+                # Rate limits switch credentials immediately (no same-credential backoff).
+                if error_type == "rate_limited":
+                    return {"ok": False, "error_type": error_type, "error": f"HTTP {status_code}"}
+                await log_info(ctx, f"Firecrawl error: {error}", config.debug_enabled)
+                return {"ok": False, "error_type": error_type, "error": f"HTTP {status_code}"}
+            except Exception as error:
+                await log_info(ctx, f"Firecrawl error: {error}", config.debug_enabled)
+                return {"ok": False, "error_type": "network_error", "error": str(error)}
+        return {"ok": False, "error_type": "empty", "error": "empty scrape"}
+
+    data = await _run_with_credential_pool(
+        "firecrawl",
+        attempt,
+        unconfigured_message="FIRECRAWL_API_KEY/FIRECRAWL_API_KEYS 未配置。",
+    )
+    return data.get("content") if data.get("ok") else None
 
 
 async def call_jina_reader(url: str) -> dict[str, Any]:
@@ -2337,36 +2495,48 @@ async def call_tavily_map(
     limit: int = 50,
     timeout: int = 150,
 ) -> dict[str, Any]:
-    api_key = config.tavily_api_key
-    if not api_key:
-        return {
-            "ok": False,
-            "error_type": "config_error",
-            "error": "TAVILY_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set TAVILY_API_KEY <key>`。",
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        endpoint = f"{config.tavily_api_url.rstrip('/')}/map"
+        headers = {"Authorization": f"Bearer {credential}", "Content-Type": "application/json"}
+        body = {
+            "url": url,
+            "max_depth": max_depth,
+            "max_breadth": max_breadth,
+            "limit": limit,
+            "timeout": timeout,
         }
-
-    endpoint = f"{config.tavily_api_url.rstrip('/')}/map"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {"url": url, "max_depth": max_depth, "max_breadth": max_breadth, "limit": limit, "timeout": timeout}
-    if instructions:
-        body["instructions"] = instructions
-    try:
-        async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
-            response = await client.post(endpoint, headers=headers, json=body)
-            response.raise_for_status()
-            data = response.json()
+        if instructions:
+            body["instructions"] = instructions
+        try:
+            async with httpx.AsyncClient(timeout=float(timeout + 10)) as client:
+                response = await client.post(endpoint, headers=headers, json=body)
+                response.raise_for_status()
+                data = response.json()
+                return {
+                    "ok": True,
+                    "base_url": data.get("base_url", ""),
+                    "results": data.get("results", []),
+                    "response_time": data.get("response_time", 0),
+                }
+        except httpx.TimeoutException:
+            return {"ok": False, "error_type": "timeout", "error": f"映射超时: 请求超过{timeout}秒"}
+        except httpx.HTTPStatusError as error:
             return {
-                "ok": True,
-                "base_url": data.get("base_url", ""),
-                "results": data.get("results", []),
-                "response_time": data.get("response_time", 0),
+                "ok": False,
+                "error_type": _http_status_error_type(error.response.status_code),
+                "error": f"HTTP错误: {error.response.status_code} - {error.response.text[:200]}",
             }
-    except httpx.TimeoutException:
-        return {"ok": False, "error_type": "network_error", "error": f"映射超时: 请求超过{timeout}秒"}
-    except httpx.HTTPStatusError as e:
-        return {"ok": False, "error_type": "network_error", "error": f"HTTP错误: {e.response.status_code} - {e.response.text[:200]}"}
-    except Exception as e:
-        return {"ok": False, "error_type": "network_error", "error": f"映射错误: {str(e)}"}
+        except Exception as error:
+            return {"ok": False, "error_type": "network_error", "error": f"映射错误: {str(error)}"}
+
+    return await _run_with_credential_pool(
+        "tavily",
+        attempt,
+        unconfigured_message=(
+            "TAVILY_API_KEY/TAVILY_API_KEYS 未配置。请运行 `smart-search setup`，"
+            "或使用 `smart-search config set TAVILY_API_KEYS '[\"…\"]'`。"
+        ),
+    )
 
 
 async def search(
@@ -2435,8 +2605,8 @@ async def search(
             if provider_config["provider"] == "openai-compatible":
                 provider_config["stream"] = stream
 
-    has_tavily = bool(config.tavily_api_key)
-    has_firecrawl = bool(config.firecrawl_api_key)
+    has_tavily = config.tavily_has_credentials()
+    has_firecrawl = config.firecrawl_has_credentials()
     tavily_count = 0
     firecrawl_count = 0
     if extra_sources > 0:
@@ -3301,12 +3471,12 @@ async def fetch(url: str) -> dict[str, Any]:
         }
 
     if not (
-        config.tavily_api_key
+        config.tavily_has_credentials()
         or config.jina_has_credentials()
         or config.zhipu_mcp_api_key
-        or config.firecrawl_api_key
+        or config.firecrawl_has_credentials()
     ):
-        error = "TAVILY_API_KEY、JINA_API_KEY/JINA_API_KEYS、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY 均未配置"
+        error = "TAVILY_API_KEY/KEYS、JINA_API_KEY/KEYS、ZHIPU_MCP_API_KEY 和 FIRECRAWL_API_KEY/KEYS 均未配置"
         error_type = "config_error"
     else:
         error = "所有提取服务均未能获取内容"
@@ -3350,44 +3520,72 @@ async def exa_search(
     exclude_domains: str | list[str] | tuple[str, ...] = "",
     category: str = "",
 ) -> dict[str, Any]:
-    api_key = config.exa_api_key
-    if not api_key:
-        return {
-            "ok": False,
-            "error_type": "config_error",
-            "error": "EXA_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set EXA_API_KEY <key>`。",
-        }
-
-    provider = ExaSearchProvider(config.exa_base_url, api_key, config.exa_timeout)
     include_domain_list = _normalize_domain_filter(include_domains)
     exclude_domain_list = _normalize_domain_filter(exclude_domains)
 
-    raw = await provider.search(
-        query=query,
-        num_results=num_results,
-        search_type=search_type,
-        include_text=include_text,
-        include_highlights=include_highlights,
-        start_published_date=start_published_date or None,
-        include_domains=include_domain_list,
-        exclude_domains=exclude_domain_list,
-        category=category or None,
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        provider = ExaSearchProvider(config.exa_base_url, credential, config.exa_timeout)
+        raw = await provider.search(
+            query=query,
+            num_results=num_results,
+            search_type=search_type,
+            include_text=include_text,
+            include_highlights=include_highlights,
+            start_published_date=start_published_date or None,
+            include_domains=include_domain_list,
+            exclude_domains=exclude_domain_list,
+            category=category or None,
+        )
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"ok": False, "error_type": "parse_error", "error": raw}
+        if not data.get("ok", False):
+            data.setdefault("error_type", "network_error")
+        return data
+
+    return await _run_with_credential_pool(
+        "exa",
+        attempt,
+        unconfigured_message=(
+            "EXA_API_KEY/EXA_API_KEYS 未配置。请运行 `smart-search setup`，"
+            "或使用 `smart-search config set EXA_API_KEYS '[\"…\"]'`。"
+        ),
     )
+
+
+def _anysearch_provider(api_key: str | None = None) -> AnySearchProvider:
+    return AnySearchProvider(
+        config.anysearch_api_url,
+        api_key if api_key is not None else config.anysearch_api_key,
+        config.anysearch_timeout,
+    )
+
+
+async def _anysearch_with_pool(operation_fn) -> dict[str, Any]:
+    """Run an AnySearch provider operation under the credential pool.
+
+    Empty credentials preserve anonymous Acceptance Surface behavior.
+    """
+    from .credential_pool import CredentialPoolError, ProviderCredentialPool
+
+    pool = ProviderCredentialPool(config)
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"ok": False, "error_type": "parse_error", "error": raw}
-    if not data.get("ok", False):
-        data.setdefault("error_type", "network_error")
-    return data
+        credentials = pool.resolve("anysearch")
+    except CredentialPoolError as error:
+        return {"ok": False, "provider": "anysearch", "error_type": "config_error", "error": str(error)}
 
+    if not credentials:
+        return await operation_fn(_anysearch_provider(None))
 
-def _anysearch_provider() -> AnySearchProvider:
-    return AnySearchProvider(config.anysearch_api_url, config.anysearch_api_key, config.anysearch_timeout)
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        return await operation_fn(_anysearch_provider(credential))
+
+    return await pool.execute_with_rotation("anysearch", attempt, credentials=credentials)
 
 
 async def anysearch_domains(domain: str = "") -> dict[str, Any]:
-    return await _anysearch_provider().discover_domains(domain)
+    return await _anysearch_with_pool(lambda provider: provider.discover_domains(domain))
 
 
 async def anysearch_search(
@@ -3397,21 +3595,23 @@ async def anysearch_search(
     max_results: int = 5,
     sub_domain_params: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
-    return await _anysearch_provider().vertical_search(
-        query=query,
-        domain=domain,
-        sub_domain=sub_domain,
-        max_results=max_results,
-        sub_domain_params=sub_domain_params,
+    return await _anysearch_with_pool(
+        lambda provider: provider.vertical_search(
+            query=query,
+            domain=domain,
+            sub_domain=sub_domain,
+            max_results=max_results,
+            sub_domain_params=sub_domain_params,
+        )
     )
 
 
 async def anysearch_extract(url: str, max_length: int = 20000) -> dict[str, Any]:
-    return await _anysearch_provider().extract(url, max_length=max_length)
+    return await _anysearch_with_pool(lambda provider: provider.extract(url, max_length=max_length))
 
 
 async def anysearch_batch(queries: list[str], max_results: int = 3) -> dict[str, Any]:
-    return await _anysearch_provider().batch_search(queries, max_results=max_results)
+    return await _anysearch_with_pool(lambda provider: provider.batch_search(queries, max_results=max_results))
 
 
 async def _decode_provider_json(raw: str, provider: str) -> dict[str, Any]:
@@ -3474,23 +3674,25 @@ async def zhipu_mcp_read_file(repo: str, path: str, ref: str = "") -> dict[str, 
 
 
 async def exa_find_similar(url: str, num_results: int = 5) -> dict[str, Any]:
-    api_key = config.exa_api_key
-    if not api_key:
-        return {
-            "ok": False,
-            "error_type": "config_error",
-            "error": "EXA_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set EXA_API_KEY <key>`。",
-        }
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        provider = ExaSearchProvider(config.exa_base_url, credential, config.exa_timeout)
+        raw = await provider.find_similar(url=url, num_results=num_results)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"ok": False, "error_type": "parse_error", "error": raw}
+        if not data.get("ok", False):
+            data.setdefault("error_type", "network_error")
+        return data
 
-    provider = ExaSearchProvider(config.exa_base_url, api_key, config.exa_timeout)
-    raw = await provider.find_similar(url=url, num_results=num_results)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"ok": False, "error_type": "parse_error", "error": raw}
-    if not data.get("ok", False):
-        data.setdefault("error_type", "network_error")
-    return data
+    return await _run_with_credential_pool(
+        "exa",
+        attempt,
+        unconfigured_message=(
+            "EXA_API_KEY/EXA_API_KEYS 未配置。请运行 `smart-search setup`，"
+            "或使用 `smart-search config set EXA_API_KEYS '[\"…\"]'`。"
+        ),
+    )
 
 
 async def zhipu_search(
@@ -3532,53 +3734,61 @@ async def zhipu_search(
 
 
 async def context7_library(name: str, query: str = "") -> dict[str, Any]:
-    api_key = config.context7_api_key
-    if not api_key:
-        return {
-            "ok": False,
-            "error_type": "config_error",
-            "error": "CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。",
-        }
     if config.context7_migration_required:
         return {
             "ok": False,
             "error_type": "config_error",
             "error": "CONTEXT7_BASE_URL is a retired REST setting. Set CONTEXT7_MCP_API_URL to migrate to Remote MCP.",
         }
-    provider = Context7Provider(config.context7_mcp_api_url, api_key, config.context7_timeout)
-    raw = await provider.library(name, query)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"ok": False, "error_type": "parse_error", "error": raw}
-    if not data.get("ok", False):
-        data.setdefault("error_type", "network_error")
-    return data
+
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        provider = Context7Provider(config.context7_mcp_api_url, credential, config.context7_timeout)
+        raw = await provider.library(name, query)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"ok": False, "error_type": "parse_error", "error": raw}
+        if not data.get("ok", False):
+            data.setdefault("error_type", "network_error")
+        return data
+
+    return await _run_with_credential_pool(
+        "context7",
+        attempt,
+        unconfigured_message=(
+            "CONTEXT7_API_KEY/CONTEXT7_API_KEYS 未配置。请运行 `smart-search setup`，"
+            "或使用 `smart-search config set CONTEXT7_API_KEYS '[\"…\"]'`。"
+        ),
+    )
 
 
 async def context7_docs(library_id: str, query: str) -> dict[str, Any]:
-    api_key = config.context7_api_key
-    if not api_key:
-        return {
-            "ok": False,
-            "error_type": "config_error",
-            "error": "CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。",
-        }
     if config.context7_migration_required:
         return {
             "ok": False,
             "error_type": "config_error",
             "error": "CONTEXT7_BASE_URL is a retired REST setting. Set CONTEXT7_MCP_API_URL to migrate to Remote MCP.",
         }
-    provider = Context7Provider(config.context7_mcp_api_url, api_key, config.context7_timeout)
-    raw = await provider.docs(library_id, query)
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"ok": False, "error_type": "parse_error", "error": raw}
-    if not data.get("ok", False):
-        data.setdefault("error_type", "network_error")
-    return data
+
+    async def attempt(credential: str, index: int) -> dict[str, Any]:
+        provider = Context7Provider(config.context7_mcp_api_url, credential, config.context7_timeout)
+        raw = await provider.docs(library_id, query)
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"ok": False, "error_type": "parse_error", "error": raw}
+        if not data.get("ok", False):
+            data.setdefault("error_type", "network_error")
+        return data
+
+    return await _run_with_credential_pool(
+        "context7",
+        attempt,
+        unconfigured_message=(
+            "CONTEXT7_API_KEY/CONTEXT7_API_KEYS 未配置。请运行 `smart-search setup`，"
+            "或使用 `smart-search config set CONTEXT7_API_KEYS '[\"…\"]'`。"
+        ),
+    )
 
 
 async def _test_primary_chat_completion(api_url: str, api_key: str, model: str) -> dict[str, Any]:
@@ -3970,26 +4180,54 @@ async def _safe_test_main_provider_connection(provider_config: dict[str, Any]) -
 
 
 async def _test_exa_connection() -> dict[str, Any]:
-    exa_key = config.exa_api_key
-    if not exa_key:
-        return {"status": "not_configured", "message": "EXA_API_KEY 未设置，Exa 搜索功能不可用"}
-    start = time.time()
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{config.exa_base_url.rstrip('/')}/search",
-            headers={"x-api-key": exa_key, "content-type": "application/json"},
-            json={"query": "test", "numResults": 1, "type": "keyword"},
-        )
-        response_time = _elapsed_ms(start)
-        if resp.status_code == 200:
-            return {"status": "ok", "message": "Exa API 可用 (HTTP 200)", "response_time_ms": response_time}
-        return {"status": "warning", "message": f"HTTP {resp.status_code}: {resp.text[:100]}", "response_time_ms": response_time}
+    pool_status = config.provider_credential_pool_status("exa")
+    try:
+        credentials = config.provider_credentials("exa")
+    except Exception as error:
+        return {"status": "config_error", "message": str(error), "credential_pool": pool_status}
+    if not credentials:
+        return {
+            "status": "not_configured",
+            "message": "EXA_API_KEY/EXA_API_KEYS 未设置，Exa 搜索功能不可用",
+            "credential_pool": pool_status,
+        }
+    result = await exa_search("test", num_results=1, search_type="keyword")
+    if result.get("ok"):
+        return {
+            "status": "ok",
+            "message": "Exa API 可用",
+            "response_time_ms": result.get("elapsed_ms", 0),
+            "credential_pool": pool_status,
+            "key_index": result.get("key_index"),
+            "credential_rotated": bool(result.get("credential_rotated")),
+        }
+    error_type = result.get("error_type", "")
+    status = error_type if error_type in {"auth_error", "config_error", "parameter_error", "rate_limited", "timeout"} else "warning"
+    return {
+        "status": status,
+        "message": result.get("error", "Exa 不可用"),
+        "response_time_ms": result.get("elapsed_ms", 0),
+        "credential_pool": pool_status,
+        "key_index": result.get("key_index"),
+        "credential_rotated": bool(result.get("credential_rotated")),
+    }
 
 
 async def _test_tavily_connection() -> dict[str, Any]:
-    tavily_key = config.tavily_api_key
-    if not tavily_key:
-        return {"status": "not_configured", "message": "TAVILY_API_KEY 未设置，Tavily 功能不可用"}
+    from .credential_pool import CredentialPoolError
+
+    pool_status = config.provider_credential_pool_status("tavily")
+    try:
+        credentials = config.provider_credentials("tavily")
+    except CredentialPoolError as error:
+        return {"status": "config_error", "message": str(error), "credential_pool": pool_status}
+    if not credentials:
+        return {
+            "status": "not_configured",
+            "message": "TAVILY_API_KEY/TAVILY_API_KEYS 未设置，Tavily 功能不可用",
+            "credential_pool": pool_status,
+        }
+    tavily_key = credentials[0]
     start = time.time()
     timeout = httpx.Timeout(connect=6.0, read=config.tavily_timeout, write=10.0, pool=None)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=config.ssl_verify_enabled) as client:
@@ -4000,8 +4238,18 @@ async def _test_tavily_connection() -> dict[str, Any]:
         )
         response_time = _elapsed_ms(start)
         if resp.status_code == 200:
-            return {"status": "ok", "message": "Tavily API 可用 (HTTP 200)", "response_time_ms": response_time}
-        return {"status": "warning", "message": f"HTTP {resp.status_code}: {resp.text[:100]}", "response_time_ms": response_time}
+            return {
+                "status": "ok",
+                "message": "Tavily API 可用 (HTTP 200)",
+                "response_time_ms": response_time,
+                "credential_pool": pool_status,
+            }
+        return {
+            "status": "warning",
+            "message": f"HTTP {resp.status_code}: {resp.text[:100]}",
+            "response_time_ms": response_time,
+            "credential_pool": pool_status,
+        }
 
 
 async def _test_jina_connection() -> dict[str, Any]:
@@ -4066,13 +4314,32 @@ async def _test_zhipu_mcp_connection() -> dict[str, Any]:
 
 
 async def _test_context7_connection() -> dict[str, Any]:
-    if not config.context7_api_key:
-        return {"status": "not_configured", "message": "CONTEXT7_API_KEY 未设置，Context7 Remote MCP 功能不可用"}
+    pool_status = config.provider_credential_pool_status("context7")
+    if not config.context7_has_credentials():
+        return {
+            "status": "not_configured",
+            "message": "CONTEXT7_API_KEY/CONTEXT7_API_KEYS 未设置，Context7 Remote MCP 功能不可用",
+            "credential_pool": pool_status,
+        }
     result = await context7_library("react", "hooks")
     if result.get("ok"):
-        return {"status": "ok", "message": "Context7 Remote MCP 可用", "response_time_ms": result.get("elapsed_ms", 0)}
+        return {
+            "status": "ok",
+            "message": "Context7 Remote MCP 可用",
+            "response_time_ms": result.get("elapsed_ms", 0),
+            "credential_pool": pool_status,
+            "key_index": result.get("key_index"),
+            "credential_rotated": bool(result.get("credential_rotated")),
+        }
     status = "config_error" if result.get("error_type") == "config_error" else "warning"
-    return {"status": status, "message": result.get("error", "Context7 Remote MCP 不可用"), "response_time_ms": result.get("elapsed_ms", 0)}
+    return {
+        "status": status,
+        "message": result.get("error", "Context7 Remote MCP 不可用"),
+        "response_time_ms": result.get("elapsed_ms", 0),
+        "credential_pool": pool_status,
+        "key_index": result.get("key_index"),
+        "credential_rotated": bool(result.get("credential_rotated")),
+    }
 
 
 async def doctor() -> dict[str, Any]:
@@ -4118,10 +4385,19 @@ async def doctor() -> dict[str, Any]:
     except Exception as e:
         info["jina_connection_test"] = {"status": "error", "message": str(e)}
 
-    if config.firecrawl_api_key:
-        info["firecrawl_connection_test"] = {"status": "configured", "message": "FIRECRAWL_API_KEY 已设置"}
+    firecrawl_pool = config.provider_credential_pool_status("firecrawl")
+    if config.firecrawl_has_credentials():
+        info["firecrawl_connection_test"] = {
+            "status": "configured",
+            "message": "FIRECRAWL_API_KEY/FIRECRAWL_API_KEYS 已设置",
+            "credential_pool": firecrawl_pool,
+        }
     else:
-        info["firecrawl_connection_test"] = {"status": "not_configured", "message": "FIRECRAWL_API_KEY 未设置，Firecrawl 功能不可用"}
+        info["firecrawl_connection_test"] = {
+            "status": "not_configured",
+            "message": "FIRECRAWL_API_KEY/FIRECRAWL_API_KEYS 未设置，Firecrawl 功能不可用",
+            "credential_pool": firecrawl_pool,
+        }
 
     try:
         info["zhipu_connection_test"] = await _test_zhipu_connection()
@@ -4643,7 +4919,7 @@ async def _smoke_live(start: float) -> dict[str, Any]:
         cases.append(_case("zhipu search", True, {"skipped": "ZHIPU_API_KEY not configured"}))
 
     context7_status = doctor_result.get("context7_connection_test", {})
-    if config.context7_api_key:
+    if config.context7_has_credentials():
         context7_ok = context7_status.get("status") == "ok"
         docs_fallback_available = len(capability_status.get("docs_search", {}).get("configured", [])) > 1
         cases.append(
@@ -4661,7 +4937,7 @@ async def _smoke_live(start: float) -> dict[str, Any]:
     else:
         cases.append(_case("context7 resolve library", True, {"skipped": "CONTEXT7_API_KEY not configured"}))
 
-    if config.tavily_api_key or config.firecrawl_api_key:
+    if config.tavily_has_credentials() or config.firecrawl_has_credentials():
         fetch_result = await fetch("https://example.com")
         cases.append(_case("web fetch fallback chain", bool(fetch_result.get("ok")), {"provider": fetch_result.get("provider", ""), "provider_attempts": fetch_result.get("provider_attempts", [])}))
     else:

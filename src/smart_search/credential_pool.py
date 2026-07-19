@@ -18,9 +18,13 @@ from typing import Any, Awaitable, Callable, Mapping
 from .file_lock import bounded_file_lock
 
 # Allowlisted provider id → (KEYS config key, single KEY config key).
-# #40 wires Jina only; remaining allowlisted providers attach in follow-on work.
 PROVIDER_CREDENTIAL_KEYS: Mapping[str, tuple[str, str]] = {
+    "exa": ("EXA_API_KEYS", "EXA_API_KEY"),
+    "tavily": ("TAVILY_API_KEYS", "TAVILY_API_KEY"),
     "jina": ("JINA_API_KEYS", "JINA_API_KEY"),
+    "firecrawl": ("FIRECRAWL_API_KEYS", "FIRECRAWL_API_KEY"),
+    "context7": ("CONTEXT7_API_KEYS", "CONTEXT7_API_KEY"),
+    "anysearch": ("ANYSEARCH_API_KEYS", "ANYSEARCH_API_KEY"),
 }
 
 ROTATABLE_ERROR_TYPES = frozenset({"rate_limited", "quota_exhausted"})

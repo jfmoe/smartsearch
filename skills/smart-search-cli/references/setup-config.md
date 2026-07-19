@@ -69,7 +69,8 @@
 - `ZHIPU_API_URL` defaults to `https://open.bigmodel.cn/api`.
 - `ZHIPU_SEARCH_ENGINE` defaults to `search_std`.
 - Official Web Search API service values include `search_std`, `search_pro`, `search_pro_sogou`, and `search_pro_quark`.
-- Use `smart-search setup --non-interactive --jina-key "key"` to let Jina satisfy `web_fetch`; `JINA_RESPOND_WITH=readerlm-v2` also requires `JINA_API_KEY`.
+- Use `smart-search setup --non-interactive --jina-key "key"` to let Jina satisfy `web_fetch`; `JINA_RESPOND_WITH=readerlm-v2` also requires `JINA_API_KEY` or `JINA_API_KEYS`.
+- Allowlisted providers support a **Provider Credential Pool**: `EXA_API_KEYS`, `TAVILY_API_KEYS`, `JINA_API_KEYS`, `FIRECRAWL_API_KEYS`, `CONTEXT7_API_KEYS`, and `ANYSEARCH_API_KEYS` as JSON string arrays (config and env). A non-empty KEYS list fully replaces the matching single `*_API_KEY` after empty-strip and dedupe. Manage whole arrays with `smart-search config set PROVIDER_API_KEYS '["…","…"]'` or by pasting a JSON array into setup / `--*-key` flags—no add/remove subcommands. Runtime selects credentials with round-robin and rotates only on rate-limit / explicit quota exhaustion; doctor reports pool enablement, key count, and masked tails without raw secrets.
 - Use `smart-search setup --non-interactive --zhipu-mcp-key "key"` only when the user explicitly wants Coding Plan Remote MCP quota.
 - Use `smart-search setup --non-interactive --openai-compatible-stream true` only when an OpenAI-compatible relay benefits from SSE streaming for long requests. Default remains false.
 - Use `smart-search setup --non-interactive --openai-compatible-fallback-models "model-a,model-b"` to save ordered OpenAI-compatible backup models for primary model instability. `--fallback off` and `search --model MODEL` disable this model fallback for one invocation.
