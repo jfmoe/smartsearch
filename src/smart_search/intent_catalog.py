@@ -136,6 +136,25 @@ def ordered_capabilities(capabilities: Iterable[str]) -> list[str]:
     return [capability_id for capability_id in CAPABILITY_IDS if capability_id in selected]
 
 
+def parse_caller_capabilities(declaration: str) -> list[str]:
+    if not declaration.strip():
+        raise ValueError("Caller capability declaration must not be empty; use 'none' for an empty set")
+    values = [value.strip().lower() for value in declaration.split(",")]
+    if any(not value for value in values):
+        raise ValueError("Caller capability declaration contains an empty CSV element; use 'none' for an empty set")
+    if "none" in values:
+        if len(values) != 1:
+            raise ValueError("Caller capability declaration sentinel 'none' must be used alone")
+        return []
+    unknown = next((value for value in values if value not in INTENT_ROUTING_CATALOG), "")
+    if unknown:
+        allowed = ", ".join(CAPABILITY_IDS)
+        raise ValueError(
+            f"Caller capability declaration has unknown capability '{unknown}'. Allowed values: {allowed}, or none"
+        )
+    return ordered_capabilities(values)
+
+
 def rule_terms(capability_id: str, *, localized_only: bool = False) -> frozenset[str]:
     capability = INTENT_ROUTING_CATALOG[capability_id]
     return frozenset(

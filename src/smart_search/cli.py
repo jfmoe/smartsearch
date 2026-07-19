@@ -2415,6 +2415,8 @@ async def _run_async(args: argparse.Namespace) -> int:
             "fallback": args.fallback,
             "providers": args.providers,
         }
+        if args.capabilities is not None:
+            search_kwargs["capabilities"] = args.capabilities
         if args.stream is not None:
             search_kwargs["stream"] = args.stream
         if "timeout_seconds" in inspect.signature(service.search).parameters:
@@ -2428,7 +2430,10 @@ async def _run_async(args: argparse.Namespace) -> int:
             data = _search_timeout_result(args.query, args.timeout, search_kwargs)
         return _journal_and_print(data, args.format, args.output)
     if args.command == "route":
-        data = await service.route(args.query, validation=args.validation, mode=args.router_mode)
+        route_kwargs = {"validation": args.validation, "mode": args.router_mode}
+        if args.capabilities is not None:
+            route_kwargs["capabilities"] = args.capabilities
+        data = await service.route(args.query, **route_kwargs)
         return _print_result("route", data, args.format, args.output)
     if args.command == "route-calibrate":
         data = await service.route_calibrate(models=args.models)
@@ -2829,6 +2834,11 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--validation", choices=["fast", "balanced", "strict"], default="")
     search_parser.add_argument("--fallback", choices=["auto", "off"], default="")
     search_parser.add_argument("--providers", default="auto")
+    search_parser.add_argument(
+        "--capabilities",
+        default=None,
+        help="Complete caller capability CSV, or exclusive 'none'.",
+    )
     stream_group = search_parser.add_mutually_exclusive_group()
     stream_group.add_argument("--stream", dest="stream", action="store_true", default=None, help="Use stream=true for OpenAI-compatible main search.")
     stream_group.add_argument("--no-stream", dest="stream", action="store_false", help="Force stream=false for OpenAI-compatible main search.")
@@ -2841,6 +2851,11 @@ def build_parser() -> argparse.ArgumentParser:
     route_parser.set_defaults(command="route")
     route_parser.add_argument("query")
     route_parser.add_argument("--validation", choices=["fast", "balanced", "strict"], default="")
+    route_parser.add_argument(
+        "--capabilities",
+        default=None,
+        help="Complete caller capability CSV, or exclusive 'none'.",
+    )
     route_parser.add_argument(
         "--router-mode",
         choices=["hybrid", "rules", "off"],

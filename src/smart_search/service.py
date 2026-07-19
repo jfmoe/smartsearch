@@ -31,7 +31,7 @@ from .intent_router import (
     _ordered_capabilities,
     _semantic_summary,
 )
-from .intent_catalog import CAPABILITY_IDS, calibration_cases, calibration_query_map
+from .intent_catalog import CAPABILITY_IDS, calibration_cases, calibration_query_map, parse_caller_capabilities
 from .logger import log_info
 from .providers.anysearch import (
     AnySearchProvider,
@@ -2319,6 +2319,7 @@ async def search(
     providers: str = "auto",
     stream: bool | None = None,
     timeout_seconds: float | None = None,
+    capabilities: str | None = None,
 ) -> dict[str, Any]:
     start = time.time()
     session_id = new_session_id()
@@ -2329,6 +2330,8 @@ async def search(
             raise ValueError(f"Invalid validation level: {validation_level}")
         if fallback_mode not in config._ALLOWED_FALLBACK_MODES:
             raise ValueError(f"Invalid fallback mode: {fallback_mode}")
+        if capabilities is not None:
+            parse_caller_capabilities(capabilities)
     except ValueError as e:
         return _empty_search_result(start, session_id, query, "parameter_error", str(e))
 
@@ -2387,7 +2390,12 @@ async def search(
 
     selected_main_provider_configs = main_provider_configs if fallback_mode != "off" else main_provider_configs[:1]
     try:
-        route_result = await IntentRouter(config).route(query, validation_level=validation_level, allow_remote=True)
+        route_result = await IntentRouter(config).route(
+            query,
+            validation_level=validation_level,
+            allow_remote=True,
+            capabilities=capabilities,
+        )
     except ValueError as e:
         return _empty_search_result(start, session_id, query, "parameter_error", str(e), extra={"validation_level": validation_level})
     fetch_urls = _extract_urls(query)
@@ -2570,22 +2578,27 @@ async def search(
 
     supplemental_sources: list[dict] = []
     vertical_discovery_result: dict[str, Any] | None = None
-    if validation_level in {"balanced", "strict"}:
-        if "docs_search" in supplemental_paths:
+    caller_capabilities = set(route_result.intent_signals.get("caller_capabilities") or [])
+
+    def should_execute(capability: str) -> bool:
+        return validation_level in {"balanced", "strict"} or capability in caller_capabilities
+
+    if validation_level in {"balanced", "strict"} or caller_capabilities:
+        if "docs_search" in supplemental_paths and should_execute("docs_search"):
             docs_sources, docs_attempts = await _run_docs_search_fallback(query, providers=providers, fallback=fallback_mode)
             provider_attempts.extend(docs_attempts)
             supplemental_sources.extend(docs_sources)
-        if "web_search" in supplemental_paths:
+        if "web_search" in supplemental_paths and should_execute("web_search"):
             web_sources, web_attempts = await _run_web_search_fallback(query, count=max(1, extra_sources or 3), providers=providers, fallback=fallback_mode)
             provider_attempts.extend(web_attempts)
             supplemental_sources.extend(web_sources)
-        if "web_fetch" in supplemental_paths:
+        if "web_fetch" in supplemental_paths and should_execute("web_fetch"):
             fetch_url = fetch_urls[0] if fetch_urls else query.strip()
             fetch_result, fetch_attempts = await _run_web_fetch_fallback(fetch_url, fallback=fallback_mode)
             provider_attempts.extend(fetch_attempts)
             if fetch_result:
                 supplemental_sources.append({"url": fetch_result["url"], "provider": fetch_result["provider"], "description": fetch_result["content"][:300]})
-        if "vertical_search" in supplemental_paths:
+        if "vertical_search" in supplemental_paths and should_execute("vertical_search"):
             vertical_sources, vertical_attempts, vertical_discovery_result = await _run_vertical_search_fallback(
                 query,
                 providers=providers,
@@ -2635,6 +2648,7 @@ async def route(
     validation: str = "",
     mode: str = "",
     allow_remote: bool = True,
+    capabilities: str | None = None,
 ) -> dict[str, Any]:
     start = time.time()
     try:
@@ -2646,6 +2660,7 @@ async def route(
             validation_level=validation_level,
             mode=mode,
             allow_remote=allow_remote,
+            capabilities=capabilities,
         )
     except ValueError as e:
         return {

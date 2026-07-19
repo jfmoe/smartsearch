@@ -34,6 +34,104 @@ async def test_route_outputs_multiple_capabilities_for_url_verification(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_caller_declaration_unions_rules_and_none_keeps_rules(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
+
+    declared = await service.route(
+        "verify https://example.com/source",
+        validation="strict",
+        capabilities="VERTICAL_SEARCH,docs_search",
+    )
+    empty = await service.route(
+        "verify https://example.com/source",
+        validation="strict",
+        capabilities="NoNe",
+    )
+
+    assert declared["required_capabilities"] == [
+        "docs_search",
+        "web_search",
+        "web_fetch",
+        "vertical_search",
+    ]
+    assert declared["intent_signals"]["caller_capabilities"] == ["docs_search", "vertical_search"]
+    assert empty["required_capabilities"] == ["web_search", "web_fetch"]
+    assert empty["intent_signals"]["caller_capabilities"] == []
+    assert empty["router_engines_used"] == ["rules", "caller"]
+    assert empty["degraded"] is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_router_mode_conflicts_but_saved_mode_allows_declaration(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "off")
+
+    conflict = await service.route("plain query", mode="rules", capabilities="docs_search")
+    saved = await service.route("plain query", capabilities="docs_search")
+
+    assert conflict["ok"] is False
+    assert conflict["error_type"] == "parameter_error"
+    assert "--router-mode cannot be combined with --capabilities" in conflict["error"]
+    assert saved["ok"] is True
+    assert saved["intent_router_mode"] == "off"
+    assert saved["required_capabilities"] == ["docs_search"]
+    assert saved["router_engines_used"] == ["rules", "caller"]
+
+
+@pytest.mark.asyncio
+async def test_search_executes_explicit_capability_in_fast_and_matches_route(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-secret")
+    calls = []
+
+    async def fake_search(self, query, platform="", ctx=None):
+        calls.append("main_search")
+        return "Answer."
+
+    async def fake_docs_search(query, providers="auto", fallback="auto"):
+        calls.append("docs_search")
+        return [{"url": "https://docs.example.com", "provider": "exa"}], [
+            {"capability": "docs_search", "provider": "exa", "status": "ok", "elapsed_ms": 1, "result_count": 1}
+        ]
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(service, "_run_docs_search_fallback", fake_docs_search)
+
+    search_result = await service.search("plain query", validation="fast", capabilities="docs_search")
+    route_result = await service.route("plain query", validation="fast", capabilities="docs_search")
+
+    assert search_result["ok"] is True
+    assert calls == ["main_search", "docs_search"]
+    assert any(attempt["capability"] == "docs_search" for attempt in search_result["provider_attempts"])
+    assert search_result["routing_decision"]["required_capabilities"] == route_result["required_capabilities"]
+    assert search_result["routing_decision"]["intent_signals"] == route_result["intent_signals"]
+
+
+@pytest.mark.asyncio
+async def test_undeclared_fast_search_keeps_supplemental_providers_idle(monkeypatch):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-secret")
+
+    async def fake_search(self, query, platform="", ctx=None):
+        return "Answer."
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("undeclared fast search must keep existing supplemental-provider behavior")
+
+    monkeypatch.setattr(service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(service, "_run_docs_search_fallback", should_not_run)
+
+    result = await service.search("React API docs", validation="fast")
+
+    assert result["ok"] is True
+    assert result["routing_decision"]["required_capabilities"] == ["docs_search"]
+    assert all(attempt["capability"] != "docs_search" for attempt in result["provider_attempts"])
+
+
+@pytest.mark.asyncio
 async def test_route_keeps_zh_current_field_narrow_for_english_current_queries(monkeypatch):
     monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "rules")
 

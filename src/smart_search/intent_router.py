@@ -12,6 +12,7 @@ from .intent_catalog import (
     calibration_query_map,
     classifier_prompt_material,
     ordered_capabilities,
+    parse_caller_capabilities,
     rule_terms,
     semantic_examples,
 )
@@ -344,11 +345,46 @@ class IntentRouter:
         mode: str = "",
         allow_remote: bool = True,
         plan_intent_signals: dict[str, Any] | None = None,
+        capabilities: str | None = None,
     ) -> IntentRouteResult:
+        if capabilities is not None and mode:
+            raise ValueError("--router-mode cannot be combined with --capabilities")
         selected_mode = (mode or self.config.intent_router_mode).strip().lower()
         if selected_mode not in ALLOWED_INTENT_ROUTER_MODES:
             allowed = ", ".join(sorted(ALLOWED_INTENT_ROUTER_MODES))
             raise ValueError(f"Invalid SMART_SEARCH_INTENT_ROUTER: {selected_mode}. Supported values: {allowed}")
+        if capabilities is not None:
+            caller_capabilities = parse_caller_capabilities(capabilities)
+            rules = build_rules_route(
+                query,
+                validation_level=validation_level,
+                plan_intent_signals=plan_intent_signals,
+                mode=selected_mode,
+            )
+            required_capabilities = _ordered_capabilities(
+                set(rules.required_capabilities) | set(caller_capabilities)
+            )
+            signals = dict(rules.intent_signals)
+            signals["caller_capabilities"] = caller_capabilities
+            reasons = list(rules.reasons)
+            reasons.append(
+                "caller declared capabilities: "
+                + (", ".join(caller_capabilities) if caller_capabilities else "none")
+            )
+            return IntentRouteResult(
+                query=query,
+                intent_router_mode=selected_mode,
+                required_capabilities=required_capabilities,
+                intent_signals=signals,
+                confidence=rules.confidence,
+                router_engines_used=["rules", "caller"],
+                reasons=reasons,
+                docs_intent=rules.docs_intent or "docs_search" in required_capabilities,
+                zh_current_intent=rules.zh_current_intent,
+                web_current_intent=rules.web_current_intent,
+                fetch_intent=rules.fetch_intent or "web_fetch" in required_capabilities,
+                supplemental_paths=required_capabilities,
+            )
         if selected_mode == "off":
             return IntentRouteResult(
                 query=query,

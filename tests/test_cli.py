@@ -1,6 +1,9 @@
-import json
 import asyncio
+import json
 from pathlib import Path
+
+import pytest
+
 from smart_search import cli
 
 
@@ -2154,6 +2157,190 @@ def test_search_passes_routing_options(monkeypatch, capsys):
     assert code == cli.EXIT_OK
     assert captured == {"validation": "strict", "fallback": "off", "providers": "grok,zhipu"}
     assert json.loads(capsys.readouterr().out)["content"] == "Answer"
+
+
+def test_search_and_route_pass_the_same_caller_capability_declaration(monkeypatch, capsys):
+    captured = []
+
+    async def fake_search(query, capabilities=None, **kwargs):
+        captured.append(("search", capabilities))
+        return {"ok": True, "content": "Answer", "sources": [], "sources_count": 0}
+
+    async def fake_route(query, capabilities=None, **kwargs):
+        captured.append(("route", capabilities))
+        return {"ok": True, "query": query, "required_capabilities": [], "executed_search": False}
+
+    monkeypatch.setattr(cli.service, "search", fake_search)
+    monkeypatch.setattr(cli.service, "route", fake_route)
+
+    assert cli.main(["search", "query", "--capabilities", " Docs_Search,WEB_FETCH "]) == cli.EXIT_OK
+    capsys.readouterr()
+    assert cli.main(["route", "query", "--capabilities", "none"]) == cli.EXIT_OK
+    capsys.readouterr()
+
+    assert captured == [
+        ("search", " Docs_Search,WEB_FETCH "),
+        ("route", "none"),
+    ]
+
+
+def test_research_rejects_caller_capability_declaration(capsys):
+    try:
+        cli.main(["research", "query", "--capabilities", "none"])
+    except SystemExit as exc:
+        assert exc.code == cli.EXIT_PARAMETER_ERROR
+    else:
+        raise AssertionError("research must reject --capabilities")
+
+    assert "unrecognized arguments: --capabilities none" in capsys.readouterr().err
+
+
+def test_route_normalizes_caller_capabilities_at_the_public_cli(monkeypatch, capsys):
+    async def remote_router_must_not_run(*args, **kwargs):
+        raise AssertionError("caller declaration must skip remote router adapters")
+
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
+    monkeypatch.setenv("INTENT_EMBEDDING_API_URL", "https://embed.example.com/embeddings")
+    monkeypatch.setenv("INTENT_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("INTENT_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_URL", "https://classifier.example.com/chat/completions")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_KEY", "classifier-secret")
+    monkeypatch.setenv("INTENT_CLASSIFIER_MODEL", "intent-mini")
+    monkeypatch.setattr(cli.service.IntentRouter, "_semantic_route", remote_router_must_not_run)
+    monkeypatch.setattr(cli.service.IntentRouter, "_classifier_route", remote_router_must_not_run)
+
+    code = cli.main([
+        "route",
+        "plain query",
+        "--capabilities",
+        " WEB_FETCH,docs_search,Docs_Search ",
+        "--format",
+        "json",
+    ])
+
+    data = json.loads(capsys.readouterr().out)
+    assert code == cli.EXIT_OK
+    assert data["required_capabilities"] == ["docs_search", "web_fetch"]
+    assert data["intent_signals"]["caller_capabilities"] == ["docs_search", "web_fetch"]
+    assert data["router_engines_used"] == ["rules", "caller"]
+    assert data["degraded"] is False
+    assert data["degraded_reason"] == ""
+    assert data["executed_search"] is False
+
+
+@pytest.mark.parametrize(
+    ("declaration", "message"),
+    [
+        ("", "must not be empty"),
+        ("docs_search,", "empty CSV element"),
+        ("unknown", "unknown capability 'unknown'"),
+        ("main_search", "unknown capability 'main_search'"),
+        ("none,docs_search", "'none' must be used alone"),
+    ],
+)
+def test_route_rejects_invalid_caller_capability_declarations(declaration, message, capsys):
+    code = cli.main(["route", "query", "--capabilities", declaration, "--format", "json"])
+
+    data = json.loads(capsys.readouterr().out)
+    assert code == cli.EXIT_PARAMETER_ERROR
+    assert data["error_type"] == "parameter_error"
+    assert message in data["error"]
+
+
+def test_search_reports_invalid_caller_capabilities_before_configuration_errors(capsys):
+    code = cli.main(["search", "query", "--capabilities", "zhipu", "--format", "json"])
+
+    data = json.loads(capsys.readouterr().out)
+    assert code == cli.EXIT_PARAMETER_ERROR
+    assert data["error_type"] == "parameter_error"
+    assert "unknown capability 'zhipu'" in data["error"]
+
+
+def test_public_cli_caller_route_unions_rules_and_rejects_explicit_mode(monkeypatch, capsys):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "off")
+
+    code = cli.main([
+        "route",
+        "verify https://example.com/source",
+        "--validation",
+        "strict",
+        "--capabilities",
+        "docs_search",
+        "--format",
+        "json",
+    ])
+    routed = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert routed["intent_router_mode"] == "off"
+    assert routed["required_capabilities"] == ["docs_search", "web_search", "web_fetch"]
+    assert routed["intent_signals"]["caller_capabilities"] == ["docs_search"]
+    assert routed["executed_search"] is False
+
+    code = cli.main([
+        "route",
+        "query",
+        "--router-mode",
+        "rules",
+        "--capabilities",
+        "docs_search",
+        "--format",
+        "json",
+    ])
+    conflict = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_PARAMETER_ERROR
+    assert "--router-mode cannot be combined with --capabilities" in conflict["error"]
+
+
+def test_public_cli_fast_search_executes_caller_capability_and_skips_remote_router(monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-secret")
+    monkeypatch.setenv("INTENT_EMBEDDING_API_URL", "https://embed.example.com/embeddings")
+    monkeypatch.setenv("INTENT_EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("INTENT_EMBEDDING_MODEL", "embed-model")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_URL", "https://classifier.example.com/chat/completions")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_KEY", "classifier-secret")
+    monkeypatch.setenv("INTENT_CLASSIFIER_MODEL", "intent-mini")
+    calls = []
+
+    async def fake_search(self, query, platform="", ctx=None):
+        calls.append("main_search")
+        return "Answer."
+
+    async def fake_docs_search(query, providers="auto", fallback="auto"):
+        calls.append("docs_search")
+        return [{"url": "https://docs.example.com", "provider": "exa"}], [
+            {"capability": "docs_search", "provider": "exa", "status": "ok", "elapsed_ms": 1, "result_count": 1}
+        ]
+
+    async def remote_router_must_not_run(*args, **kwargs):
+        raise AssertionError("caller declaration must skip remote router adapters")
+
+    monkeypatch.setattr(cli.service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(cli.service, "_run_docs_search_fallback", fake_docs_search)
+    monkeypatch.setattr(cli.service.IntentRouter, "_semantic_route", remote_router_must_not_run)
+    monkeypatch.setattr(cli.service.IntentRouter, "_classifier_route", remote_router_must_not_run)
+
+    code = cli.main([
+        "search",
+        "plain query",
+        "--validation",
+        "fast",
+        "--capabilities",
+        "docs_search",
+        "--format",
+        "json",
+    ])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert calls == ["main_search", "docs_search"]
+    assert data["routing_decision"]["required_capabilities"] == ["docs_search"]
+    assert data["routing_decision"]["router_engines_used"] == ["rules", "caller"]
+    assert data["routing_decision"]["degraded"] is False
 
 
 def test_route_command_outputs_json_markdown_and_content(monkeypatch, capsys):
