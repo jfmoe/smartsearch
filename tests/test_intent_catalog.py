@@ -59,6 +59,8 @@ def test_generated_skill_reference_is_concise_and_catalog_derived() -> None:
     assert "Select when:" in reference
     assert "Do not select when:" in reference
     assert "provider" in reference.lower()
+    assert "runtime does not supplement" in reference
+    assert "known URLs or strict validation" in reference
     assert "INTENT_EMBEDDING_THRESHOLD" not in reference
 
 

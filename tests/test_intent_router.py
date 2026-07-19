@@ -34,7 +34,7 @@ async def test_route_outputs_multiple_capabilities_for_url_verification(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_caller_declaration_unions_rules_and_none_keeps_rules(monkeypatch):
+async def test_caller_declaration_is_authoritative_and_none_stays_empty(monkeypatch):
     monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
 
     declared = await service.route(
@@ -48,16 +48,11 @@ async def test_caller_declaration_unions_rules_and_none_keeps_rules(monkeypatch)
         capabilities="NoNe",
     )
 
-    assert declared["required_capabilities"] == [
-        "docs_search",
-        "web_search",
-        "web_fetch",
-        "vertical_search",
-    ]
+    assert declared["required_capabilities"] == ["docs_search", "vertical_search"]
     assert declared["intent_signals"]["caller_capabilities"] == ["docs_search", "vertical_search"]
-    assert empty["required_capabilities"] == ["web_search", "web_fetch"]
+    assert empty["required_capabilities"] == []
     assert empty["intent_signals"]["caller_capabilities"] == []
-    assert empty["router_engines_used"] == ["rules", "caller"]
+    assert empty["router_engines_used"] == ["caller"]
     assert empty["degraded"] is False
 
 
@@ -74,7 +69,7 @@ async def test_explicit_router_mode_conflicts_but_saved_mode_allows_declaration(
     assert saved["ok"] is True
     assert saved["intent_router_mode"] == "off"
     assert saved["required_capabilities"] == ["docs_search"]
-    assert saved["router_engines_used"] == ["rules", "caller"]
+    assert saved["router_engines_used"] == ["caller"]
 
 
 @pytest.mark.asyncio

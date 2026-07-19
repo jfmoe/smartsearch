@@ -226,7 +226,7 @@ def render_skill_capability_reference() -> str:
         [
             "## Decision caveats",
             "",
-            "Judge the complete set independently for the request: multiple capabilities or an empty set are valid. Provider selection, fallback, thresholds, strict validation, URL extraction, and routing merge behavior remain runtime-owned.",
+            "Judge the complete set independently for the request: multiple capabilities or an empty set are valid. Include every capability needed for known URLs or strict validation because the runtime does not supplement a caller declaration. Provider selection and same-capability fallback remain runtime-owned.",
             "",
         ]
     )

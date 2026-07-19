@@ -4304,7 +4304,7 @@ async def _smoke_mock(start: float) -> dict[str, Any]:
             and ordinary_search_calls == [{"query": "plain query", "capabilities": "web_search"}]
             and ordinary_routing["required_capabilities"] == ["web_search"]
             and ordinary_routing["intent_signals"]["caller_capabilities"] == ["web_search"]
-            and ordinary_routing["router_engines_used"] == ["rules", "caller"],
+            and ordinary_routing["router_engines_used"] == ["caller"],
             {"calls": ordinary_search_calls, "result": ordinary_search_result},
         )
     )

@@ -355,35 +355,21 @@ class IntentRouter:
             raise ValueError(f"Invalid SMART_SEARCH_INTENT_ROUTER: {selected_mode}. Supported values: {allowed}")
         if capabilities is not None:
             caller_capabilities = parse_caller_capabilities(capabilities)
-            rules = build_rules_route(
-                query,
-                validation_level=validation_level,
-                plan_intent_signals=plan_intent_signals,
-                mode=selected_mode,
-            )
-            required_capabilities = _ordered_capabilities(
-                set(rules.required_capabilities) | set(caller_capabilities)
-            )
-            signals = dict(rules.intent_signals)
-            signals["caller_capabilities"] = caller_capabilities
-            reasons = list(rules.reasons)
-            reasons.append(
+            reasons = [
                 "caller declared capabilities: "
                 + (", ".join(caller_capabilities) if caller_capabilities else "none")
-            )
+            ]
             return IntentRouteResult(
                 query=query,
                 intent_router_mode=selected_mode,
-                required_capabilities=required_capabilities,
-                intent_signals=signals,
-                confidence=rules.confidence,
-                router_engines_used=["rules", "caller"],
+                required_capabilities=caller_capabilities,
+                intent_signals={"caller_capabilities": caller_capabilities},
+                confidence=1.0,
+                router_engines_used=["caller"],
                 reasons=reasons,
-                docs_intent=rules.docs_intent or "docs_search" in required_capabilities,
-                zh_current_intent=rules.zh_current_intent,
-                web_current_intent=rules.web_current_intent,
-                fetch_intent=rules.fetch_intent or "web_fetch" in required_capabilities,
-                supplemental_paths=required_capabilities,
+                docs_intent="docs_search" in caller_capabilities,
+                fetch_intent="web_fetch" in caller_capabilities,
+                supplemental_paths=caller_capabilities,
             )
         if selected_mode == "off":
             return IntentRouteResult(

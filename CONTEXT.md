@@ -105,8 +105,8 @@ _Avoid_: successful search、provider search、all commands
 _Avoid_: debug log、response cache、search history
 
 **Caller Capability Declaration**:
-调用 Smart Search 的上层模型为一次普通搜索显式声明完整检索能力集合；空集合也是有效声明。声明存在时，它与本地确定性规则结果合并，并取代 embeddings 和 classifier 的远程语义判断；它只能引用 Capability Seam，不能选择供应方或撤销规则已经确认的能力。
-_Avoid_: provider override、router hint、capability replacement
+调用方为一次普通 Smart Search 显式声明的完整、权威检索能力集合；空集合也是有效声明。任何调用方提供声明时，Smart Search 都不使用本地规则、embeddings 或 classifier 补充能力；声明只能引用 Capability Seam，不能选择供应方。
+_Avoid_: provider override、router hint、capability patch
 
 **Classifier Capability Decision**:
 意图分类器针对一次查询独立给出的完整检索能力集合；规则与 embeddings 只提供非权威证据，因此该结论可脱离其他路由结果评测。运行时它仍与规则和 embeddings 的结果合并，且不能选择供应方。

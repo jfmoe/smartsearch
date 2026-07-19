@@ -32,16 +32,15 @@ The current architecture has two layers:
 
 Default `smart-search search` stays fast and live. `smart-search deep` is the explicit offline Deep Research planner. It does not call providers, run `doctor`, or fetch pages by default; it emits a `research_plan` that an AI agent or user can execute step by step. `smart-search research` is the live Deep Research executor: it uses the same planner shape, then runs discovery, fetch/read, gap check, and evidence-only synthesis.
 
-Agent-authored ordinary searches pass the complete caller capability declaration in their first `search` call: use a catalog-ordered CSV such as `docs_search,web_search`, or exactly `none` for an empty set. They do not need a `route` preflight. Direct human CLI calls may omit `--capabilities` to retain hybrid routing, while `research` keeps its separate evidence workflow and does not accept this option.
+Agent-authored ordinary searches pass the complete caller capability declaration in their first `search` call: use a catalog-ordered CSV such as `docs_search,web_search`, or exactly `none` for an empty set. A declaration is authoritative: Smart Search does not add capabilities from query rules, known URLs, strict validation, embeddings, or the classifier. They do not need a `route` preflight. Any caller may omit `--capabilities` to retain hybrid routing, while `research` keeps its separate evidence workflow and does not accept this option.
 
 Intent routing now has its own layer. Instead of letting a model pick providers directly, Smart Search first decides which capabilities are needed, then the existing capability-first provider registry chooses same-capability fallback:
 
 ```text
 user query
- -> rules: URLs, explicit docs/current/fetch/vertical signals, strict validation
- -> semantic route: optional embeddings over capability examples
- -> classifier route: optional structured model classification
- -> merged required_capabilities
+ -> with --capabilities: authoritative caller capability set
+ -> without --capabilities: rules, optional embeddings, optional classifier
+ -> required_capabilities
  -> provider fallback inside docs_search / web_search / web_fetch / vertical_search
 ```
 

@@ -2222,7 +2222,7 @@ def test_route_normalizes_caller_capabilities_at_the_public_cli(monkeypatch, cap
     assert code == cli.EXIT_OK
     assert data["required_capabilities"] == ["docs_search", "web_fetch"]
     assert data["intent_signals"]["caller_capabilities"] == ["docs_search", "web_fetch"]
-    assert data["router_engines_used"] == ["rules", "caller"]
+    assert data["router_engines_used"] == ["caller"]
     assert data["degraded"] is False
     assert data["degraded_reason"] == ""
     assert data["executed_search"] is False
@@ -2256,12 +2256,12 @@ def test_search_reports_invalid_caller_capabilities_before_configuration_errors(
     assert "unknown capability 'zhipu'" in data["error"]
 
 
-def test_public_cli_caller_route_unions_rules_and_rejects_explicit_mode(monkeypatch, capsys):
+def test_public_cli_caller_route_is_authoritative_and_rejects_explicit_mode(monkeypatch, capsys):
     monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "off")
 
     code = cli.main([
         "route",
-        "verify https://example.com/source",
+        "请根据文档给出准确代码 https://example.com/source",
         "--validation",
         "strict",
         "--capabilities",
@@ -2273,8 +2273,10 @@ def test_public_cli_caller_route_unions_rules_and_rejects_explicit_mode(monkeypa
 
     assert code == cli.EXIT_OK
     assert routed["intent_router_mode"] == "off"
-    assert routed["required_capabilities"] == ["docs_search", "web_search", "web_fetch"]
-    assert routed["intent_signals"]["caller_capabilities"] == ["docs_search"]
+    assert routed["required_capabilities"] == ["docs_search"]
+    assert routed["intent_signals"] == {"caller_capabilities": ["docs_search"]}
+    assert routed["router_engines_used"] == ["caller"]
+    assert routed["degraded"] is False
     assert routed["executed_search"] is False
 
     code = cli.main([
@@ -2291,6 +2293,70 @@ def test_public_cli_caller_route_unions_rules_and_rejects_explicit_mode(monkeypa
 
     assert code == cli.EXIT_PARAMETER_ERROR
     assert "--router-mode cannot be combined with --capabilities" in conflict["error"]
+
+
+def test_public_cli_none_declaration_does_not_infer_from_url_or_strict_validation(monkeypatch, capsys):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
+
+    code = cli.main([
+        "route",
+        "verify https://example.com/source",
+        "--validation",
+        "strict",
+        "--capabilities",
+        "none",
+        "--format",
+        "json",
+    ])
+    routed = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert routed["required_capabilities"] == []
+    assert routed["intent_signals"] == {"caller_capabilities": []}
+    assert routed["router_engines_used"] == ["caller"]
+    assert routed["degraded"] is False
+    assert routed["executed_search"] is False
+
+
+def test_public_cli_none_search_runs_only_main_search_for_url_and_strict_validation(monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_URL", "https://relay.example.com/v1")
+    monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "relay-test-secret")
+    monkeypatch.setenv("EXA_API_KEY", "exa-test-secret")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-secret")
+    calls = []
+
+    async def fake_search(self, query, platform="", ctx=None):
+        calls.append("main_search")
+        return 'Answer.\n\nsources([{"url":"https://example.com/source","title":"Source"}])'
+
+    async def supplemental_provider_must_not_run(*args, **kwargs):
+        raise AssertionError("an authoritative none declaration must not execute supplemental providers")
+
+    monkeypatch.setattr(cli.service.OpenAICompatibleSearchProvider, "search", fake_search)
+    monkeypatch.setattr(cli.service, "_run_docs_search_fallback", supplemental_provider_must_not_run)
+    monkeypatch.setattr(cli.service, "_run_web_search_fallback", supplemental_provider_must_not_run)
+    monkeypatch.setattr(cli.service, "_run_web_fetch_fallback", supplemental_provider_must_not_run)
+    monkeypatch.setattr(cli.service, "_run_vertical_search_fallback", supplemental_provider_must_not_run)
+
+    code = cli.main([
+        "search",
+        "verify https://example.com/source",
+        "--validation",
+        "strict",
+        "--capabilities",
+        "none",
+        "--extra-sources",
+        "0",
+        "--format",
+        "json",
+    ])
+    data = json.loads(capsys.readouterr().out)
+
+    assert code == cli.EXIT_OK
+    assert calls == ["main_search"]
+    assert data["routing_decision"]["required_capabilities"] == []
+    assert data["routing_decision"]["router_engines_used"] == ["caller"]
+    assert [attempt["capability"] for attempt in data["provider_attempts"]] == ["main_search"]
 
 
 def test_public_cli_fast_search_executes_caller_capability_and_skips_remote_router(monkeypatch, capsys):
@@ -2339,7 +2405,7 @@ def test_public_cli_fast_search_executes_caller_capability_and_skips_remote_rout
     assert code == cli.EXIT_OK
     assert calls == ["main_search", "docs_search"]
     assert data["routing_decision"]["required_capabilities"] == ["docs_search"]
-    assert data["routing_decision"]["router_engines_used"] == ["rules", "caller"]
+    assert data["routing_decision"]["router_engines_used"] == ["caller"]
     assert data["routing_decision"]["degraded"] is False
 
 
