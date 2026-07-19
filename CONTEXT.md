@@ -116,10 +116,6 @@ _Avoid_: classifier additions、classifier patch、provider decision
 统一拥有 capability 身份与顺序、选择语义、规则词项和语义例句的运行时领域目录；rules、embeddings、classifier、CLI 和生成的 Skill 契约共同消费它，而 provider fallback 与路由控制流不属于该目录。
 _Avoid_: Skill capability list、prompt definitions、routing rules DSL
 
-**Cross-account Quota Aggregation**:
-把多个独立供应方账户分别计量的定期免费额度，组合成一个逻辑上的可用额度集合；它描述动机或效果，不是运行时凭据选用机制。
-_Avoid_: key rotation、high-availability credential pool、Provider Credential Pool
-
 **Provider Credential Pool**:
 某一允许名单内供应方上，用户配置的多个认证凭据集合；运行时按轮询选用，并在额度或限流类失败时于同一次请求内换用其他凭据。
 _Avoid_: key pool、key rotation、API key list、high-availability credential pool
