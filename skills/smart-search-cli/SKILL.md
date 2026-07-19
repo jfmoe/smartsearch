@@ -42,7 +42,7 @@ Select the first branch whose condition matches the user's task. Load only the c
 
 **Choose this branch when:** the task changes CLI or provider architecture, routing, fallback, configuration, packaging, or release behavior.
 
-1. Read `references/provider-routing.md` for capability and fallback invariants, and `references/regression-release.md` for the distributable smoke/release gate.
+1. Read `references/provider-routing.md` for capability and fallback invariants, `references/intent-routing-capabilities.md` when changing routing capability definitions, and `references/regression-release.md` for the distributable smoke/release gate.
 2. From a source checkout, run `python scripts/sync-skill.py --check`, `smart-search regression`, and `smart-search smoke --mock --format json`. Add live checks only when real keys are available and the user expects them.
 
 **Completion criterion:** the mirror check and source regression exit successfully, mock smoke returns `ok: true` with no failed cases, and any failure is reported with its command and observed result.

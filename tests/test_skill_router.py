@@ -92,7 +92,7 @@ def test_top_level_keeps_exactly_four_cross_branch_invariants() -> None:
     assert "## Key Boundaries" not in text
 
 
-def test_public_skill_exposes_exactly_six_functional_references() -> None:
+def test_public_skill_exposes_exactly_seven_functional_references() -> None:
     expected_references = {
         "cli-core.md",
         "command-patterns.md",
@@ -100,6 +100,7 @@ def test_public_skill_exposes_exactly_six_functional_references() -> None:
         "provider-routing.md",
         "regression-release.md",
         "setup-config.md",
+        "intent-routing-capabilities.md",
     }
     actual_references = {path.name for path in REFERENCE_DIR.glob("*.md")}
     text = _main_skill_text()

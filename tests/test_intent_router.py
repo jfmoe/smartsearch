@@ -236,6 +236,30 @@ async def test_classifier_can_add_capability_when_semantic_is_ambiguous(monkeypa
     assert any("classifier: docs intent" in reason for reason in result["reasons"])
 
 
+@pytest.mark.asyncio
+async def test_invalid_successful_classifier_response_degrades_without_retry(monkeypatch):
+    monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_URL", "https://classifier.example.com/chat/completions")
+    monkeypatch.setenv("INTENT_CLASSIFIER_API_KEY", "classifier-secret")
+    monkeypatch.setenv("INTENT_CLASSIFIER_MODEL", "intent-mini")
+    calls = 0
+
+    async def invalid_classifier_response(self, query, rules, semantic):
+        nonlocal calls
+        calls += 1
+        raise ValueError("classifier response missing JSON content")
+
+    monkeypatch.setattr(IntentRouter, "_classifier_route", invalid_classifier_response)
+
+    result = await service.route("普通问题")
+
+    assert calls == 1
+    assert result["required_capabilities"] == []
+    assert result["router_engines_used"] == ["rules"]
+    assert result["degraded"] is True
+    assert "classifier unavailable: classifier response missing JSON content" in result["degraded_reason"]
+
+
 def test_deep_research_plan_uses_offline_rules_even_when_remote_router_configured(monkeypatch):
     monkeypatch.setenv("SMART_SEARCH_INTENT_ROUTER", "hybrid")
     monkeypatch.setenv("INTENT_EMBEDDING_API_URL", "https://embed.example.com/embeddings")

@@ -27,6 +27,42 @@ INLINE_CONTEXT_POINTER = re.compile(
 MARKDOWN_CONTEXT_POINTER = re.compile(
     r"\]\((references/[A-Za-z0-9._/-]+\.md)(?:#[^)]*)?\)"
 )
+GENERATED_CAPABILITY_REFERENCE = Path("references/intent-routing-capabilities.md")
+
+
+def catalog_reference_text() -> str | None:
+    source_root = PROJECT_ROOT / "src"
+    catalog_module = source_root / "smart_search" / "intent_catalog.py"
+    if not catalog_module.is_file():
+        return None
+    sys.path.insert(0, str(source_root))
+    try:
+        from smart_search.intent_catalog import render_skill_capability_reference
+
+        return render_skill_capability_reference()
+    finally:
+        sys.path.pop(0)
+
+
+def write_generated_references() -> None:
+    expected = catalog_reference_text()
+    if expected is None:
+        return
+    target = PUBLIC_SKILL / GENERATED_CAPABILITY_REFERENCE
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(expected, encoding="utf-8")
+
+
+def generated_reference_drift() -> list[str]:
+    expected = catalog_reference_text()
+    if expected is None:
+        return []
+    target = PUBLIC_SKILL / GENERATED_CAPABILITY_REFERENCE
+    if not target.is_file():
+        return [f"generated reference is missing: {GENERATED_CAPABILITY_REFERENCE.as_posix()}"]
+    if target.read_text(encoding="utf-8") != expected:
+        return [f"generated reference differs from catalog: {GENERATED_CAPABILITY_REFERENCE.as_posix()}"]
+    return []
 
 
 def skill_file_map(root: Path) -> dict[str, bytes]:
@@ -74,6 +110,7 @@ def validate_public_skill() -> None:
 
 
 def sync_skill() -> int:
+    write_generated_references()
     validate_public_skill()
 
     PACKAGED_SKILL.parent.mkdir(parents=True, exist_ok=True)
@@ -103,6 +140,7 @@ def sync_skill() -> int:
 
 def check_skill() -> int:
     validate_public_skill()
+    generated_drift = generated_reference_drift()
     public_files = skill_file_map(PUBLIC_SKILL)
     packaged_files = skill_file_map(PACKAGED_SKILL)
     missing = sorted(public_files.keys() - packaged_files.keys())
@@ -119,8 +157,10 @@ def check_skill() -> int:
         print(f"unexpected in package: {relative_path}", file=sys.stderr)
     for relative_path in different:
         print(f"content differs: {relative_path}", file=sys.stderr)
+    for message in generated_drift:
+        print(message, file=sys.stderr)
 
-    if missing or unexpected or different:
+    if missing or unexpected or different or generated_drift:
         return 1
     print(f"Skill mirror is up to date ({len(public_files)} files).")
     return 0

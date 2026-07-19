@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from smart_search.intent_catalog import render_skill_capability_reference
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SYNC_SCRIPT = ROOT / "scripts" / "sync-skill.py"
@@ -152,3 +154,13 @@ def test_check_rejects_a_missing_context_pointer_target(tmp_path: Path) -> None:
         "context pointer target is missing: references/missing.md"
         in result.stderr
     )
+
+
+def test_generated_capability_reference_and_package_mirror_have_no_drift() -> None:
+    expected = render_skill_capability_reference()
+    relative_path = Path("references/intent-routing-capabilities.md")
+
+    assert (ROOT / PUBLIC_SKILL_PATH / relative_path).read_text(encoding="utf-8") == expected
+    assert (ROOT / PACKAGED_SKILL_PATH / relative_path).read_text(encoding="utf-8") == expected
+    result = _run_sync(ROOT, "--check")
+    assert result.returncode == 0, result.stderr

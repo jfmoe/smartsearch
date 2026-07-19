@@ -21,7 +21,6 @@ from .intent_router import (
     DOCS_INTENT_KEYWORDS as ROUTER_DOCS_INTENT_KEYWORDS,
     FETCH_INTENT_KEYWORDS as ROUTER_FETCH_INTENT_KEYWORDS,
     ROUTABLE_CAPABILITIES,
-    ROUTE_CALIBRATION_QUERIES,
     VERTICAL_INTENT_KEYWORDS as ROUTER_VERTICAL_INTENT_KEYWORDS,
     IntentRouteResult,
     IntentRouter,
@@ -32,6 +31,7 @@ from .intent_router import (
     _ordered_capabilities,
     _semantic_summary,
 )
+from .intent_catalog import CAPABILITY_IDS, calibration_cases, calibration_query_map
 from .logger import log_info
 from .providers.anysearch import (
     AnySearchProvider,
@@ -2763,19 +2763,15 @@ def _configured_embedding_margin() -> float:
 
 
 def _route_calibration_dataset() -> list[dict[str, Any]]:
-    examples: list[dict[str, Any]] = []
-    for label, queries in ROUTE_CALIBRATION_QUERIES.items():
-        expected = [] if label == "none" else [label]
-        for index, query_text in enumerate(queries, 1):
-            examples.append(
-                {
-                    "id": f"{label}-{index:02d}",
-                    "query": query_text,
-                    "expected_capabilities": list(expected),
-                    "expected_label": label,
-                }
-            )
-    return examples
+    return [
+        {
+            "id": case.id,
+            "query": case.query,
+            "expected_capabilities": list(case.expected_capabilities),
+            "expected_label": case.expected_capabilities[0] if case.expected_capabilities else "none",
+        }
+        for case in calibration_cases()
+    ]
 
 
 async def _embed_in_batches(router: IntentRouter, inputs: list[str], batch_size: int = 64) -> list[list[float]]:
@@ -3086,7 +3082,7 @@ async def route_calibrate(models: str = "") -> dict[str, Any]:
     start = time.time()
     selected_models = _parse_calibration_models(models)
     dataset = _route_calibration_dataset()
-    labels = [*sorted(ROUTABLE_CAPABILITIES), "none"]
+    labels = [*CAPABILITY_IDS, "none"]
     results: list[dict[str, Any]] = []
     for model in selected_models:
         try:
@@ -3116,8 +3112,11 @@ async def route_calibrate(models: str = "") -> dict[str, Any]:
         "model_results": results,
         "failed_models": failed_models,
         "dataset_size": len(dataset),
-        "dataset_counts": {label: len(queries) for label, queries in ROUTE_CALIBRATION_QUERIES.items()},
-        "capabilities": sorted(ROUTABLE_CAPABILITIES),
+        "dataset_counts": {
+            label: len(queries)
+            for label, queries in calibration_query_map().items()
+        },
+        "capabilities": list(CAPABILITY_IDS),
         "labels": labels,
         "default_threshold": _configured_embedding_threshold(),
         "default_margin": _configured_embedding_margin(),

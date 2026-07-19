@@ -7,174 +7,28 @@ from typing import Any
 import httpx
 
 from .embedding_presets import embedding_preset_for_model, embedding_threshold_commands
+from .intent_catalog import (
+    CAPABILITY_IDS,
+    calibration_query_map,
+    classifier_prompt_material,
+    ordered_capabilities,
+    rule_terms,
+    semantic_examples,
+)
 
 
 ALLOWED_INTENT_ROUTER_MODES = {"hybrid", "rules", "off"}
-ROUTABLE_CAPABILITIES = {"docs_search", "web_search", "web_fetch", "vertical_search"}
-
-DOCS_INTENT_KEYWORDS = {
-    "api",
-    "sdk",
-    "library",
-    "framework",
-    "docs",
-    "documentation",
-    "reference",
-    "react",
-    "next.js",
-    "vue",
-    "python",
-    "prisma",
-    "langchain",
-    "openai",
-    "context7",
-    "接口",
-    "文档",
-    "库",
-    "框架",
-    "函数",
-    "参数",
-    "配置",
-    "接入",
+ROUTABLE_CAPABILITIES = frozenset(CAPABILITY_IDS)
+DOCS_INTENT_KEYWORDS = rule_terms("docs_search")
+CURRENT_INTENT_KEYWORDS = rule_terms("web_search")
+ZH_CURRENT_INTENT_KEYWORDS = rule_terms("web_search", localized_only=True)
+FETCH_INTENT_KEYWORDS = rule_terms("web_fetch")
+VERTICAL_INTENT_KEYWORDS = rule_terms("vertical_search")
+CAPABILITY_UTTERANCES = {
+    capability_id: semantic_examples(capability_id)
+    for capability_id in CAPABILITY_IDS
 }
-
-CURRENT_INTENT_KEYWORDS = {
-    "今天",
-    "今日",
-    "最新",
-    "国内",
-    "中国",
-    "政策",
-    "新闻",
-    "实时",
-    "刚刚",
-    "当前",
-    "现在",
-    "本周",
-    "本月",
-    "战报",
-    "比分",
-    "赛程",
-    "赛果",
-    "季后赛",
-    "比赛",
-    "nba",
-    "足球",
-    "篮球",
-    "today",
-    "latest",
-    "current",
-    "realtime",
-    "live",
-    "recent",
-}
-
-ZH_CURRENT_INTENT_KEYWORDS = {
-    "今天",
-    "今日",
-    "最新",
-    "国内",
-    "中国",
-    "政策",
-    "新闻",
-    "实时",
-    "刚刚",
-    "当前",
-    "现在",
-    "本周",
-    "本月",
-    "战报",
-    "比分",
-    "赛程",
-    "赛果",
-    "季后赛",
-    "比赛",
-    "足球",
-    "篮球",
-}
-
-FETCH_INTENT_KEYWORDS = {"http://", "https://"}
-
-VERTICAL_INTENT_KEYWORDS = {
-    "cve",
-    "vulnerability",
-    "vulnerabilities",
-    "安全漏洞",
-    "漏洞",
-    "finance",
-    "financial",
-    "股票",
-    "基金",
-    "财报",
-    "法律",
-    "法规",
-    "legal",
-    "law",
-    "academic",
-    "论文",
-    "paper",
-    "repo",
-    "repository",
-    "github",
-    "gitlab",
-    "codebase",
-    "code search",
-    "code docs",
-    "代码",
-    "代码库",
-    "开源仓库",
-    # Keep automatic Vertical Discovery intentionally narrow. These phrases
-    # identify gaming/travel lookup intent without treating ordinary uses of
-    # “game” or “travel” as vertical searches.
-    "game guide",
-    "game walkthrough",
-    "gaming guide",
-    "游戏攻略",
-    "游戏资料",
-    "游戏数据库",
-    "travel itinerary",
-    "travel guide",
-    "trip itinerary",
-    "旅行攻略",
-    "旅游攻略",
-    "自由行路线",
-}
-
-CAPABILITY_UTTERANCES: dict[str, list[str]] = {
-    "docs_search": [
-        "React useEffect API docs",
-        "how to integrate this SDK",
-        "Python function parameters reference",
-        "OpenAI API documentation",
-        "这个 SDK 怎么接入",
-        "查一下框架官方文档和配置参数",
-    ],
-    "web_search": [
-        "today China AI news",
-        "latest policy announcement",
-        "current market update",
-        "NBA score today",
-        "今天国内 AI 新闻",
-        "最近有什么最新变化",
-    ],
-    "web_fetch": [
-        "verify the claim in this URL https://example.com",
-        "summarize this webpage",
-        "fetch this PDF",
-        "请核验这个链接里的说法 https://example.com",
-        "抓取这个网页正文",
-    ],
-    "vertical_search": [
-        "CVE-2026 OpenSSL vulnerability impact",
-        "financial filing structured search",
-        "legal regulation database search",
-        "GitHub codebase search",
-        "漏洞影响范围",
-        "垂直领域结构化检索",
-        "Elden Ring game walkthrough",
-        "Tokyo travel itinerary",
-    ],
-}
+ROUTE_CALIBRATION_QUERIES = calibration_query_map()
 
 DEFAULT_ROUTE_CALIBRATION_MODELS = [
     "Qwen/Qwen3-Embedding-8B",
@@ -183,121 +37,6 @@ DEFAULT_ROUTE_CALIBRATION_MODELS = [
     "Pro/BAAI/bge-m3",
     "BAAI/bge-large-zh-v1.5",
 ]
-
-ROUTE_CALIBRATION_QUERIES: dict[str, list[str]] = {
-    "docs_search": [
-        "React useEffect official docs",
-        "Next.js app router caching docs",
-        "Python pathlib Path API reference",
-        "TypeScript compiler options documentation",
-        "LangChain retriever integration guide",
-        "OpenAI Responses API parameters",
-        "Prisma migration CLI docs",
-        "Vue watchEffect API usage",
-        "FastAPI dependency injection docs",
-        "Docker compose healthcheck reference",
-        "这个 SDK 怎么接入",
-        "查一下 React hooks 官方文档",
-        "Python requests 超时参数怎么配置",
-        "Vite 配置 alias 的文档",
-        "Context7 怎么查 LangChain 文档",
-        "OpenAI embeddings API 文档",
-        "Next.js middleware 配置项",
-        "Rust tokio select 文档",
-        "Pandas groupby 参数说明",
-        "Tailwind CSS container query docs",
-    ],
-    "web_search": [
-        "今天国内 AI 新闻",
-        "latest Nvidia earnings news",
-        "current Bitcoin price movement",
-        "今日人民币汇率变化",
-        "NBA score today Lakers",
-        "本周新能源车政策",
-        "recent OpenAI product announcement",
-        "latest Windows 11 update issue",
-        "现在上海天气预警",
-        "today stock market close summary",
-        "刚刚苹果发布会消息",
-        "最近美国大选民调",
-        "current oil price news",
-        "今日A股收盘行情",
-        "latest CVE exploit in the wild",
-        "本月中国芯片政策变化",
-        "today SpaceX launch status",
-        "latest Python release announcement",
-        "近期比特币ETF新闻",
-        "NBA今日赛程",
-    ],
-    "web_fetch": [
-        "summarize https://example.com",
-        "fetch this PDF https://example.com/report.pdf",
-        "请读取这个网页 https://example.com/post",
-        "核验这个链接里的说法 https://example.com/source",
-        "extract the main text from https://example.org/article",
-        "read this arxiv PDF https://arxiv.org/pdf/2401.00001.pdf",
-        "抓取 https://example.com/docs 的正文",
-        "summarize this url: http://example.net/page",
-        "请打开链接看看写了什么 https://example.com",
-        "compare the claim in https://example.com/claim",
-        "pull metadata from https://example.com/product",
-        "读取这篇博客 https://blog.example.com/a",
-        "fetch known URL content https://news.example.com/item",
-        "把这个PDF概括一下 https://example.com/file.pdf",
-        "verify source page http://example.org/source",
-        "get text from URL https://developer.example.com/changelog",
-        "read webpage content at https://example.edu/paper",
-        "请提取网页正文 https://docs.example.com/install",
-        "summarize linked announcement https://company.example.com/news",
-        "fetch this public page https://example.com/about",
-    ],
-    "vertical_search": [
-        "CVE-2026 OpenSSL vulnerability impact",
-        "Search GitHub codebase for auth middleware",
-        "legal regulation database search GDPR",
-        "financial filing structured search 10-K revenue",
-        "academic paper search transformer retrieval",
-        "漏洞影响范围 CVE-2025",
-        "查找 GitHub 仓库里的配置文件",
-        "法规条文数据库检索",
-        "股票财报结构化查询",
-        "医学论文数据库检索",
-        "patent search battery materials",
-        "code search repo function name",
-        "SEC filing risk factors search",
-        "法律案例检索 合同纠纷",
-        "学术论文 引用 网络 搜索",
-        "NVD vulnerability database query",
-        "vertical domain search for finance filings",
-        "repository search for Dockerfile examples",
-        "法律法规 检索 个税",
-        "数据库里查 CVE exploit score",
-        "Elden Ring game walkthrough boss guide",
-        "东京自由行路线和酒店攻略",
-    ],
-    "none": [
-        "帮我把这句话翻译成英文",
-        "写一封请假邮件",
-        "总结下面这段文字",
-        "解释这个错误堆栈的含义",
-        "帮我给变量起名",
-        "把这段 JSON 格式化",
-        "生成一个会议纪要模板",
-        "用更礼貌的语气改写这句话",
-        "给我一个早餐计划",
-        "计算 37 乘以 19",
-        "explain what recursion means in simple words",
-        "write a short haiku about winter",
-        "classify these TODO items by priority",
-        "make this paragraph shorter",
-        "帮我润色项目介绍",
-        "不联网也能回答的常识问题",
-        "给代码加一点注释",
-        "Python 函数是什么意思，用自己的话解释",
-        "React 是什么，用中文解释",
-        "帮我检查语法和错别字",
-    ],
-}
 
 DEFAULT_SEMANTIC_CONFIDENCE_THRESHOLD = 0.74
 DEFAULT_SEMANTIC_CONFIDENCE_MARGIN = 0.05
@@ -353,8 +92,26 @@ def extract_urls(query: str) -> list[str]:
 
 
 def _ordered_capabilities(capabilities: set[str]) -> list[str]:
-    order = ["docs_search", "web_search", "web_fetch", "vertical_search"]
-    return [capability for capability in order if capability in capabilities]
+    return ordered_capabilities(capabilities)
+
+
+def build_classifier_prompt(
+    query: str,
+    rules: dict[str, Any],
+    semantic: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "query": query,
+        "rules_result": rules,
+        "semantic_result": semantic,
+        **classifier_prompt_material(),
+        "instruction": (
+            "Return JSON only with required_capabilities, intent_signals, confidence, and reasons. "
+            "Decide the complete capability set independently; multiple capabilities and an empty set are valid. "
+            "Treat rules_result and semantic_result as non-authoritative evidence. "
+            "Use only allowed capability IDs. Never return provider names or main_search."
+        ),
+    }
 
 
 def build_rules_route(
@@ -766,16 +523,7 @@ class IntentRouter:
         return embeddings
 
     async def _classifier_route(self, query: str, rules: dict[str, Any], semantic: dict[str, Any]) -> dict[str, Any]:
-        prompt = {
-            "query": query,
-            "rules_result": rules,
-            "semantic_result": semantic,
-            "allowed_capabilities": sorted(ROUTABLE_CAPABILITIES),
-            "instruction": (
-                "Return strict JSON with required_capabilities, intent_signals, confidence, and reasons. "
-                "Choose only allowed capabilities. Do not choose providers."
-            ),
-        }
+        prompt = build_classifier_prompt(query, rules, semantic)
         headers = {
             "Authorization": f"Bearer {self.config.intent_classifier_api_key}",
             "Content-Type": "application/json",
