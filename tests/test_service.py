@@ -2548,25 +2548,15 @@ async def test_doctor_uses_responses_endpoint_for_explicit_xai_config(monkeypatc
     monkeypatch.setenv("XAI_API_KEY", "xai-test-secret")
     calls = []
 
-    class FakeAsyncClient:
-        def __init__(self, timeout):
-            self.timeout = timeout
+    class FakeXAIResponsesSearchProvider:
+        def __init__(self, api_url, api_key, model, tools):
+            calls.append((api_url, api_key, model, tools))
 
-        async def __aenter__(self):
-            return self
+        async def search(self, query):
+            calls.append(query)
+            return "ok"
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-        async def post(self, url, headers, json):
-            calls.append((url, json))
-            return httpx.Response(
-                200,
-                json={"output": [{"content": [{"type": "output_text", "text": "ok"}]}]},
-                request=httpx.Request("POST", url),
-            )
-
-    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(service, "XAIResponsesSearchProvider", FakeXAIResponsesSearchProvider)
 
     result = await service.doctor()
 
@@ -2574,8 +2564,8 @@ async def test_doctor_uses_responses_endpoint_for_explicit_xai_config(monkeypatc
     assert result["primary_api_mode"] == "xai-responses"
     assert result["primary_api_mode_source"] == "config_file"
     assert result["primary_connection_test"]["status"] == "ok"
-    assert calls[0][0] == "https://api.x.ai/v1/responses"
-    assert "tools" not in calls[0][1]
+    assert calls[0] == ("https://api.x.ai/v1", "xai-test-secret", "grok-4-fast", [])
+    assert calls[1] == "Reply with exactly: ok"
 
 
 @pytest.mark.asyncio

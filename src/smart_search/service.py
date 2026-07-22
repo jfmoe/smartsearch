@@ -4144,22 +4144,13 @@ async def _test_primary_connection(api_url: str, api_key: str, model: str) -> di
 
 
 async def _test_primary_responses(api_url: str, api_key: str, model: str) -> dict[str, Any]:
-    responses_url = f"{api_url.rstrip('/')}/responses"
     start = time.time()
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.post(
-            responses_url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "input": [{"role": "user", "content": "Reply with exactly: ok"}],
-                "stream": False,
-            },
-        )
-        response_time = _elapsed_ms(start)
-        if response.status_code != 200:
-            return {"status": "warning", "message": f"HTTP {response.status_code}: {response.text[:100]}", "response_time_ms": response_time}
-        return {"status": "ok", "message": f"xAI Responses API 可用 (HTTP {response.status_code})", "response_time_ms": response_time}
+    provider = XAIResponsesSearchProvider(api_url, api_key, model, [])
+    content = await asyncio.wait_for(provider.search("Reply with exactly: ok"), timeout=20.0)
+    response_time = _elapsed_ms(start)
+    if not content:
+        return {"status": "warning", "message": "xAI Responses API 返回空内容", "response_time_ms": response_time}
+    return {"status": "ok", "message": "xAI Responses API 可用", "response_time_ms": response_time}
 
 
 async def _test_main_provider_connection(provider_config: dict[str, Any]) -> dict[str, Any]:

@@ -46,7 +46,7 @@ Intent router rules:
 - `research` reuses the same `IntentRouter` before provider-advantage ordering.
 - `deep` uses offline rules/local signals only and must not call remote embeddings or classifier components.
 - Official xAI uses the Responses API `/responses` route through `XAI_*`. Compatible relays/gateways use Chat Completions `/chat/completions` through `OPENAI_COMPATIBLE_*`.
-- `OPENAI_COMPATIBLE_STREAM=true` or `search --stream` sets `stream=true` only for OpenAI-compatible `search` and provider-side `fetch`; it is a relay compatibility switch and does not affect xAI Responses, URL description, or source ranking.
+- `OPENAI_COMPATIBLE_STREAM=true` or `search --stream` controls only OpenAI-compatible `search` and provider-side `fetch`. xAI Responses always uses SSE internally and aggregates the completed response; the CLI switch does not alter that transport.
 - Legacy `SMART_SEARCH_API_URL`, `SMART_SEARCH_API_KEY`, `SMART_SEARCH_API_MODE`, `SMART_SEARCH_MODEL`, and `SMART_SEARCH_XAI_TOOLS` are unsupported config keys.
 - xAI Responses mode may use only `XAI_TOOLS=web_search,x_search` and a subset of those tools.
 - Chat Completions mode must not send xAI `web_search` / `x_search` tools or legacy `search_parameters`; xAI Chat Completions Live Search is deprecated.
@@ -124,7 +124,7 @@ OpenAI-compatible streaming:
 - `search --no-stream` forces `stream=false` for the current invocation.
 - `OPENAI_COMPATIBLE_FALLBACK_MODELS` is an optional comma-separated ordered list. It is tried only after the primary OpenAI-compatible model fails, and `--fallback off` or `--model MODEL` disables this model fallback for the invocation.
 - OpenAI-compatible attempts may include `model`, `transport`, `fallback_from_transport`, `fallback_from_model`, and `breaker_state`. `transport_fallback_used` records stream-to-non-stream recovery separately from provider/model `fallback_used`.
-- Streaming applies only to OpenAI-compatible `search()` and provider-side `fetch()` calls. `describe_url()` and `rank_sources()` stay non-streaming. xAI Responses behavior is unchanged.
+- OpenAI-compatible streaming applies only to `search()` and provider-side `fetch()` calls; `describe_url()` and `rank_sources()` stay non-streaming. xAI Responses uses its separate always-SSE transport.
 
 Exa domain filters:
 

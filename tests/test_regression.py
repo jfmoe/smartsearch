@@ -190,8 +190,15 @@ def test_search_timeout_retry_policy_is_distributable():
 
     skill_markers = [
         "Timeout Retry Policy",
+        "terminal exit status",
+        "session or background handle",
+        "Own yielded commands",
+        "only allowed next tool call is polling that exact handle",
+        "next tool call must poll that same handle",
+        "unique `--output` path",
+        "verify the saved query and timeout",
         "error_type: \"network_error\"",
-        "Retry up to 3 total attempts with `--timeout 180`",
+        "Retry up to 3 total attempts with `--timeout 300`",
         "`--extra-sources 1` during retry attempts",
         "Always use the CLI's `--timeout` option",
         "Do not wrap `smart-search` in a shell-level `timeout` command",
@@ -203,7 +210,7 @@ def test_search_timeout_retry_policy_is_distributable():
     ]
     contract_markers = [
         "Agent timeout handling contract",
-        "`smart-search search ... --capabilities CSV_OR_NONE --timeout 180 --extra-sources 1 --format json --output PATH`",
+        "`smart-search search ... --capabilities CSV_OR_NONE --timeout 300 --extra-sources 1 --format json --output PATH`",
         "not a shell-level `timeout` wrapper",
         "`SMART_SEARCH_RETRY_*` settings are not the contract",
         "switch to source-first fallback",

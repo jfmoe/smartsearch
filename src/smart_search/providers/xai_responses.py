@@ -29,7 +29,7 @@ class XAIResponsesSearchProvider(BaseSearchProvider):
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "text/event-stream",
             "User-Agent": "smart-search/0.1.0",
         }
 
@@ -50,7 +50,7 @@ class XAIResponsesSearchProvider(BaseSearchProvider):
             "model": self.model,
             "instructions": search_prompt,
             "input": [{"role": "user", "content": time_context + query + platform_prompt}],
-            "stream": False,
+            "stream": True,
             "tools": [{"type": tool} for tool in self.tools],
         }
         return payload
@@ -70,17 +70,52 @@ class XAIResponsesSearchProvider(BaseSearchProvider):
                 reraise=True,
             ):
                 with attempt:
-                    response = await client.post(
+                    async with client.stream(
+                        "POST",
                         f"{self.api_url}/responses",
                         headers=headers,
                         json=payload,
-                    )
-                    response.raise_for_status()
-                    return await self._parse_response(response, ctx)
+                    ) as response:
+                        response.raise_for_status()
+                        return await self._parse_streaming_response(response, ctx)
         return ""
 
     async def _parse_response(self, response: httpx.Response, ctx=None) -> str:
-        data = response.json()
+        return await self._parse_response_data(response.json(), ctx)
+
+    async def _parse_streaming_response(self, response: httpx.Response, ctx=None) -> str:
+        completed_response = None
+
+        async for line in response.aiter_lines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+
+            raw_data = line[5:].lstrip()
+            if not raw_data or raw_data == "[DONE]":
+                continue
+
+            try:
+                event = json.loads(raw_data)
+            except json.JSONDecodeError:
+                continue
+
+            event_type = event.get("type") if isinstance(event, dict) else None
+            if event_type == "response.completed" and isinstance(event.get("response"), dict):
+                completed_response = event["response"]
+            elif event_type in {"response.failed", "response.incomplete"}:
+                response_data = event.get("response") if isinstance(event.get("response"), dict) else {}
+                error = event.get("error") or response_data.get("error") or event_type
+                if isinstance(error, dict):
+                    error = error.get("message") or error.get("code") or event_type
+                raise httpx.RemoteProtocolError(f"xAI Responses stream ended with {error}")
+
+        if completed_response is None:
+            raise httpx.RemoteProtocolError("xAI Responses stream ended before response.completed")
+
+        return await self._parse_response_data(completed_response, ctx)
+
+    async def _parse_response_data(self, data: dict[str, Any], ctx=None) -> str:
         text_parts: list[str] = []
         sources: list[dict[str, str]] = []
         seen: set[str] = set()
