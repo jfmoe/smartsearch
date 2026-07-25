@@ -101,7 +101,7 @@ _Avoid_: vertical discovery、explicit vertical search、vertical intent routing
 _Avoid_: successful search、provider search、all commands
 
 **Search Result Journal**:
-启用后按发生顺序保存每次 Default Search Invocation 终态业务结果的本地记录集合；查询、回答和来源属于完整结果，认证凭据不属于可持久化内容。它用于复盘与诊断，不是调试消息流，也不作为搜索响应缓存。
+启用后按发生顺序保存每次 Default Search Invocation 终态业务结果与执行过程记录的本地集合；查询、回答、来源与「链如何被走过」的过程事实属于可持久化内容，认证凭据与供应方原始响应体不属于。它用于复盘与诊断，不是调试消息流，也不作为搜索响应缓存。
 _Avoid_: debug log、response cache、search history
 
 **Caller Capability Declaration**:
