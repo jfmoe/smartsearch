@@ -13,7 +13,7 @@
 | 5 | [05-acceptance.md](05-acceptance.md) | 验收契约（Tier 0/1、四层测试、live 矩阵）与切换步骤 | [#59](https://github.com/jfmoe/smartsearch/issues/59) |
 | 6 | [06-migration.md](06-migration.md) | 仓库迁移、退役链、随迁 manifest、ADR/CONTEXT 修订、脚手架照办件 | [#61](https://github.com/jfmoe/smartsearch/issues/61) |
 
-各章以对应票的 Resolution 及其补充决议为权威来源；票间冲突已按「后票修订前票」原则在汇编时消解，本规格文本为消解后的定稿。规格与票文冲突时以本规格为准（汇编即最后一次仲裁，见各章「修订留痕」）。
+各章以对应票的 Resolution 及其补充决议为权威来源；票间冲突已按「后票修订前票」原则在汇编时消解。**规格优先规则的边界**：规格与票文冲突时，仅当该差异属于显式留痕的汇编裁定——即 [#60 Resolution](https://github.com/jfmoe/smartsearch/issues/60#issuecomment-5082058705) 列出的悬置件定稿、各章「修订留痕」条目、或行文中标注「以文件/规格为准」的更正——才以规格为准；**未留痕的冲突视为汇编缺陷**，应回溯票文修正规格。
 
 ## 核心基调（地图 Notes 摘录）
 

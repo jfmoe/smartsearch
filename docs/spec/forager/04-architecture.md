@@ -31,7 +31,7 @@ main → app → {engine, research, classifier, doctor, journal}
 - 「empty」从错误分类法除名：直连命令空结果＝`Ok(空 Outcome)` 退 0；证据管线的证据不足＝Evidence 退 5（域切分见第 1 章）。
 - **退出码两阶段**：飞行前（argv→2、config/未知 env→3）只由预检产生；飞行后由**归因总函数**产生。attempt 级 Parameter 不映射退 2。
 - **归因总函数**（F4 + #59 B3）：只按每个 provider 的**最终 attempt** 归约（重试不参与计数），对各 kind 按**优先级全序**取最大，与重试次数、失败顺序无关。已有成功响应进入质量/证据阶段且终局失败＝Content 优先退 5，不被后续网络失败覆盖；所有可用 provider 均未产生可验证响应才退 4；同质失败顶层透传原 kind（如全 401 报 auth_error，退出码仍按族）；attempts 永远带原始 kind。
-  - **全序表定稿**（低 → 高；Content 族恒高于 Transport 族）：`Network < Timeout < RateLimited < QuotaExhausted < Auth < Parameter < Runtime < Quality < Evidence`。族间关系与全序存在性为契约（unit 真值表穷举验证）；族内排布编码期可微调，调整须同步更新真值表。
+  - **全序表定稿**（低 → 高；Content 族恒高于 Transport 族）：`Network < Timeout < RateLimited < QuotaExhausted < Auth < Parameter < Runtime < Quality < Evidence`。定义域为**飞行后 kind**（ErrorKind ∖ {Config}）：`Config` 只在飞行前预检产生（退 3），**`ProviderAttempt` 不得携带 Config**——此为类型不变量，进 unit 真值表。族间关系与全序存在性为契约（真值表穷举验证）；族内排布编码期可微调，调整须同步更新真值表。
 - `ProviderError`（thiserror）：kind + provider + status + 脱敏消息 + 耗时；status→kind 映射只在 net 一份。
 - **分类器已配置但失败**：降级继续 + stderr 警告 + journal 落痕，不影响退出码；research 裸调用下采用**固定最小降级 plan**（单步 web_search）继续执行（#59 H8）。
 - miette 只渲染 text 人类报错；契约路径（JSON）不经 anyhow/miette。

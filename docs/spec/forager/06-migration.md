@@ -26,7 +26,7 @@
 | `CONTEXT.md` | 按下述「死词清理」修订后随迁；旧仓 issue 引用全部改为全限定 URL |
 | `docs/adr/0001`（skill 安装偏好） | 标 **superseded**（自研 skill 子系统砍，改 npx skills）存档 |
 | `docs/adr/0002`（Search Result Journal） | 按下述三条修订 |
-| `docs/adr/0003`（caller 声明能力） | 有效，原样随迁 |
+| `docs/adr/0003`（caller 声明能力） | 已标 **superseded by ADR-0004**（文件现状），存档随迁；#61 票文「0003 仍有效」为误记，以文件状态为准 |
 | `docs/adr/0004`（caller 声明权威） | 有效随迁；第 2 章 A1 为其 research 豁免区的首次权威定义，加交叉引用 |
 | `docs/adr/0005`（凭据池） | 按下述修订/替代 |
 | `docs/anysearch-verified-domain-manifest.md` | 有效，原样随迁（AnySearch 晋升通道保留） |

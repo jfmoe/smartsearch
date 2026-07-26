@@ -43,13 +43,13 @@
 | L8 | AnySearch 全操作（domain/vertical discovery、extraction） | anysearch × domains/discovery × MCP |
 
 - 断言统一：退 0 + 可解析 + 该 seam 形状非空 + 无 Parse/Runtime 类 ErrorKind；不断言内容质量。失败模式排列全留 offline-e2e。
-- 抗瞬时故障（H13）：金丝雀查询固定；每用例单条有限重试；失败留档并按外部 outage 判定规则豁免（留档 + 择日重跑），不设定时哨兵。
+- 抗瞬时故障（H13）：金丝雀查询固定；每用例最多重试 2 次（共 3 次尝试）。失败可按 **outage 豁免规则**延期：证据须为 provider 官方状态页异常，或规格外最小独立探测（如 `curl` 同端点）同样失败；留档记录 case ID、时间戳、证据链接。**豁免仅延期、不计 PASS**——必须择日重跑转绿后才能过切换门；不设定时哨兵。
 - 凭据只走统一体系（`keys` + `FORAGER_` env）；废除 `ANYSEARCH_API_KEY(S)` 特读与 `ANYSEARCH_LIVE_ACCEPTANCE` 分档。退出码：全 PASS（SKIP 不计）→0、任一已配置凭据探测失败→4、配置坏→3。
 - 档次落流程不落旗标：每里程碑跑 L0 全绿 + 手动 L1–L3；切换前跑 `smoke --live` 全量（L1–L8）；live 档不进 PR CI。
 
 ## Medium 落地件（补充决议② M17–M21 定稿）
 
-- **M17 预算槽位定义**：槽位＝当前 seam 链中「尚未尝试、凭据在位、未被断路器熔断」的 provider 数，加上当前 provider 内尚未尝试的 model 候选数（openai_compatible fallback_models）；`--fallback off` 时槽位恒为 1；断路器熔断项不计入。**最小可用 slice 下限 5s**：`剩余预算/剩余槽位 < 5s` 时跳过该槽（journal 记 skipped），最后一槽可用全部剩余预算。
+- **M17 预算槽位定义**（统一算法，适用于一切链式 fallback 层）：槽位＝该层中「尚未尝试、凭据在位、未被断路器熔断」的候选数——seam 链的候选是 provider，provider 内 model 链（openai_compatible `fallback_models`）与 **classifier model 链**（`classifier.fallback_models`，在其 30s 阶段共享预算内按同规则切片）的候选是 model；`--fallback off` 只作用于 seam/主链（槽位恒为 1），**不关闭** classifier 与 provider 内部的 model 链（它们是实现细节，非用户可见 fallback 面）。断路器熔断项不计入。**最小可用 slice 下限 5s**：`剩余预算/剩余槽位 < 5s` 时跳过该槽（journal 记 skipped），最后一槽可用全部剩余预算。
 - **M18 瘦载荷边界**：默认失败载荷上限 **4 KiB**；列表字段（by_kind、providers、capability_gaps.providers_skipped）各截断至 8 项并置 `truncated: true`；message 截断至 500 字符。断言用字节上限，不用「几百字节」措辞。
 - **M19 覆盖完整性门**：Tier 0/Tier 1 → 测试 ID → provider/seam 追踪清单入库；registry 与 fixture 集合、registry 与 live 矩阵行做**集合相等断言**——新 provider/operation 无 fixture 即红。
 - **M20 随迁 manifest**：见第 6 章。
