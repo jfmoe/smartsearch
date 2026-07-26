@@ -22,7 +22,7 @@ main → app → {engine, research, classifier, doctor, journal}
 ## Provider 契约与 registry
 
 - **每 seam 一个 trait + 专属返回类型**：`WebSearch`/`DocsSearch`/`WebFetch`（supplemental 与主搜索共用 WebSearch 签名，registry 区分链序归属）；`SearchOutcome`/`DocsOutcome`/`FetchOutcome` 共享 ProviderAttempt/Source 构件。一个 provider＝一个 struct，同一 `Arc` 实例登记进多条 seam 链。
-- **seam 支持矩阵**＝「谁 impl 了哪个 trait」的编译期事实；`order` 校验查 registry。
+- **seam 支持矩阵**＝「谁 impl 了哪个 trait」的编译期事实；`order` 校验查 registry。**`map` 命令**＝tavily 直连操作（`site_map`），不设独立 seam trait（唯一 provider，需要时提升为 trait 是纯增量）；registry 在 tavily 描述内登记该操作。
 - **registry 最小职责**（F10）：唯一登记 `ProviderId`、支持 seam、凭据要求、doctor probe、构造入口；config/doctor/capability status 从同一描述读取身份，不各设 allowlist；engine 只调用 seam trait 并聚合 `ProviderAttempt`，禁止按 provider id/model 分支；openai-compatible 的 model 候选、断路器、transport fallback 全部封装在 provider 内。不引入宏、不生成 clap 树。
 
 ## 错误模型

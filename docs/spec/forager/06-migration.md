@@ -29,7 +29,7 @@
 | `docs/adr/0003`（caller 声明能力） | 已标 **superseded by ADR-0004**（文件现状），存档随迁；#61 票文「0003 仍有效」为误记，以文件状态为准 |
 | `docs/adr/0004`（caller 声明权威） | 有效随迁；第 2 章 A1 为其 research 豁免区的首次权威定义，加交叉引用 |
 | `docs/adr/0005`（凭据池） | 按下述修订/替代 |
-| `docs/anysearch-verified-domain-manifest.md` | 有效，原样随迁（AnySearch 晋升通道保留） |
+| `docs/anysearch-verified-domain-manifest.md` | **按 forager 命令面修订后随迁**：删除 Batch Discovery、AnySearch Extraction 及旧 `ANYSEARCH_API_KEY`/`ANYSEARCH_LIVE_ACCEPTANCE`/`smart-search smoke` 表述，live 验收指向第 5 章 C14–C16；域晋升通道本体保留 |
 | 本规格 `docs/spec/forager/` | 随迁（开发唯一输入） |
 | 两份 research 文档（选型、痛点清单） | 随迁入 `docs/research/` |
 | `rust-toolchain.toml`、`#![forbid(unsafe_code)]` | 脚手架照办件，见下 |
@@ -42,6 +42,7 @@
 ## CONTEXT.md 死词清理
 
 - skill 子系统词条：Agents Skill Target、Skill Container、Skill Installation Preference、Automatic Skill Sync。
+- AnySearch 词条：Batch Discovery、AnySearch Extraction（随 #53 砍除与第 5 章 extraction 裁决删除，含 Web Fetch 词条中的相关排除文案）。
 - 三层路由词条：Intent Routing Catalog 等（「能力身份 + 语义例句」内容保留，转为分类器 prompt 与 skill 契约共同来源的新词条）。
 - Search Result Journal 定义随增强更新（结果 + 过程双面）。
 - 路由文档换成声明指南（caller capability declaration + plan 注入流程）。
