@@ -28,41 +28,58 @@
 ## live-e2e（`smoke --live` 用例面）
 
 - 离线档（无 `--live`）：不碰网络——配置可解析且过值域、registry 完整、凭据在位状态（不验真伪）、journal 目录可写；进 PR CI。
-- `--live` 用例集 **L0–L8**，按 `(provider, seam/operation, transport shape)` **矩阵**组织（H12；「全绿」以矩阵行计）：
+- `--live` 用例面分两类，全部原子化编 ID（H12 修订：原 L0–L8 粗分档废止，改为下述规范化清单；「全绿」以用例 ID 计）：
 
-| ID | 内容 | 矩阵行（provider × operation × transport） |
-|---|---|---|
-| L0 | `doctor --provider` × 8 两档探测——凭据迁移验收门 | 8 行，每 provider 一行 |
-| L1 | `search` 主搜索 | xai × web_search × SSE；openai_compatible × chat × HTTP/SSE |
-| L2 | `research` 裸调用（真实 classifier + 多 seam 编排 + 证据） | classifier × chat；跨 seam 编排一行 |
-| L3 | AnySearch academic.search | anysearch × vertical_search × MCP |
-| L4 | context7 docs | context7 × docs_search × MCP（握手 + tools/call） |
-| L5 | fetch 正文提取 | jina × web_fetch × HTTP |
-| L6 | xAI SSE 流装配 | xai × stream × SSE |
-| L7 | Supplemental 补强链 + extra sources | tavily、firecrawl × web_search × HTTP |
-| L8 | AnySearch 全操作（domain/vertical discovery、extraction） | anysearch × domains/discovery × MCP |
+**流程门 L0**：`doctor --provider <p>` × 8（L0.1–L0.8，每 provider 一发深探）——凭据迁移验收门，每里程碑前置。
+
+**管线用例**（端到端编排，不入 provider 矩阵）：
+- **P1** `search` 端到端（真实 classifier 路由 + 主链 + 补强）
+- **P2** `research` 裸调用端到端（classifier 计划 + 多 seam 编排 + 证据）
+
+**Provider 契约用例矩阵**（每行恰为一个 `(provider, operation, transport)` 三元组）：
+
+| ID | provider | operation | transport |
+|---|---|---|---|
+| C01 | xai | main_search（流装配） | SSE |
+| C02 | openai_compatible | main_search（stream=false） | HTTP |
+| C03 | openai_compatible | main_search（stream=true，env 覆盖） | SSE |
+| C04 | classifier 端点 | 能力分类 + 计划生成 | HTTP |
+| C05 | tavily | web_search | HTTP |
+| C06 | firecrawl | web_search | HTTP |
+| C07 | jina | web_fetch | HTTP |
+| C08 | tavily | web_fetch | HTTP |
+| C09 | firecrawl | web_fetch | HTTP |
+| C10 | context7 | docs_search：library resolve | MCP |
+| C11 | context7 | docs_search：docs 获取 | MCP |
+| C12 | exa | docs_search | HTTP |
+| C13 | exa | similar | HTTP |
+| C14 | anysearch | vertical_search：academic.search（带域） | MCP |
+| C15 | anysearch | vertical discovery（无域形态） | MCP |
+| C16 | anysearch | domains | MCP |
+
+AnySearch **extraction 裁决**（消解 #53 砍 `anysearch-extract` 与 #59 L8 原文的矛盾）：extraction 本质为纯 fetch，**彻底删除**——不保留内部操作、不入矩阵、不入 registry。
 
 - 断言统一：退 0 + 可解析 + 该 seam 形状非空 + 无 Parse/Runtime 类 ErrorKind；不断言内容质量。失败模式排列全留 offline-e2e。
 - 抗瞬时故障（H13）：金丝雀查询固定；每用例最多重试 2 次（共 3 次尝试）。失败可按 **outage 豁免规则**延期：证据须为 provider 官方状态页异常，或规格外最小独立探测（如 `curl` 同端点）同样失败；留档记录 case ID、时间戳、证据链接。**豁免仅延期、不计 PASS**——必须择日重跑转绿后才能过切换门；不设定时哨兵。
 - 凭据只走统一体系（`keys` + `FORAGER_` env）；废除 `ANYSEARCH_API_KEY(S)` 特读与 `ANYSEARCH_LIVE_ACCEPTANCE` 分档。退出码：全 PASS（SKIP 不计）→0、任一已配置凭据探测失败→4、配置坏→3。
-- 档次落流程不落旗标：每里程碑跑 L0 全绿 + 手动 L1–L3；切换前跑 `smoke --live` 全量（L1–L8）；live 档不进 PR CI。
+- 档次落流程不落旗标：每里程碑跑 L0 全绿 + 手动 P1/P2/C14；切换前跑 `smoke --live` 全量（P1–P2 + C01–C16）；live 档不进 PR CI。
 
 ## Medium 落地件（补充决议② M17–M21 定稿）
 
 - **M17 预算槽位定义**（统一算法，适用于一切链式 fallback 层）：槽位＝该层中「尚未尝试、凭据在位、未被断路器熔断」的候选数——seam 链的候选是 provider，provider 内 model 链（openai_compatible `fallback_models`）与 **classifier model 链**（`classifier.fallback_models`，在其 30s 阶段共享预算内按同规则切片）的候选是 model；`--fallback off` 只作用于 seam/主链（槽位恒为 1），**不关闭** classifier 与 provider 内部的 model 链（它们是实现细节，非用户可见 fallback 面）。断路器熔断项不计入。**最小可用 slice 下限 5s**：`剩余预算/剩余槽位 < 5s` 时跳过该槽（journal 记 skipped），最后一槽可用全部剩余预算。
 - **M18 瘦载荷边界**：默认失败载荷上限 **4 KiB**；列表字段（by_kind、providers、capability_gaps.providers_skipped）各截断至 8 项并置 `truncated: true`；message 截断至 500 字符。断言用字节上限，不用「几百字节」措辞。
-- **M19 覆盖完整性门**：Tier 0/Tier 1 → 测试 ID → provider/seam 追踪清单入库；registry 与 fixture 集合、registry 与 live 矩阵行做**集合相等断言**——新 provider/operation 无 fixture 即红。
+- **M19 覆盖完整性门**：Tier 0/Tier 1 → 测试 ID → provider/seam 追踪清单入库。集合比较不直接比原始集合（registry 元素与用例行类型不同），三方**共同投影到统一的 `ContractCaseId` 集合**（即上表 C01–C16 + P1/P2 的 ID 全集，由 registry 描述派生生成）：registry 派生集 = fixture 集 = live 用例集，三方集合相等断言进 CI——新 provider/operation 无 fixture 或无 live 用例即红。
 - **M20 随迁 manifest**：见第 6 章。
-- **M21 冻结题集 + rubric**（人工质量抽查，行为丢失报警器，不做旧版对拍）：三题冻结——① 「Rust 的 async drop 现状与最新提案是什么？」（docs+web 混合、时效）；② 「对比 figment 与 config-rs 的分层覆盖模型，给出出处」（docs、交叉验证）；③ 「近一个月 X 上关于 <某活跃技术话题> 的主要观点」（xai x_search、时效）。rubric 三行，每行 pass/fail：相关性（回答对准问题）；来源去重（无重复/近重复来源）；引用支持结论（每主张可溯源到给出的 citation）。
+- **M21 冻结题集 + rubric**（人工质量抽查，行为丢失报警器，不做旧版对拍）：三题字面冻结——① 「Rust 的 async drop 现状与最新提案是什么？」（docs+web 混合、时效）；② 「对比 figment 与 config-rs 的分层覆盖模型，给出出处」（docs、交叉验证）；③ 「近一个月各大社区关于 Coding Agent 的讨论」（web+x 混合、时效、观点聚合）。rubric 三行，每行 pass/fail：相关性（回答对准问题）；来源去重（无重复/近重复来源）；引用支持结论（每主张可溯源到给出的 citation）。
 
 ## 人工验收清单五项
 
-① `smoke --live` 全量（凭据配齐，SKIP=0、矩阵行全绿）；② research 质量抽查（M21 冻结题集 + rubric）；③ journal 走查（双面合理、URL 脱敏生效）；④ setup 四步走查 + 二跑增量；⑤ **skill 实战验证**——新 forager skill 在**隔离环境**（独立 profile/容器，H11）经 `npx skills` 装入真实 Claude Code 会话，agent 按新流程（生成 plan → `research --plan`）完成一次任务；通过后才在本机执行「先删旧后装新」。顺序：①→④ 任意，⑤ 最后。skill 重写按新流程重构（旧 `deep` 的 `steps[].command` 工作流已死），非文本替换迁移。
+① `smoke --live` 全量（凭据配齐，SKIP=0、P1–P2 + C01–C16 全绿）；② research 质量抽查（M21 冻结题集 + rubric）；③ journal 走查（双面合理、URL 脱敏生效）；④ setup 四步走查 + 二跑增量；⑤ **skill 实战验证**——新 forager skill 在**隔离环境**（独立 profile/容器，H11）经 `npx skills` 装入真实 Claude Code 会话，agent 按新流程（生成 plan → `research --plan`）完成一次任务；通过后才在本机执行「先删旧后装新」。顺序：①→④ 任意，⑤ 最后。skill 重写按新流程重构（旧 `deep` 的 `steps[].command` 工作流已死），非文本替换迁移。
 
 ## 切换步骤（三阶段）
 
 本仓**零代码删除**（整体 archive 冻结）；「Cargo 工作区落地顺序」作废。
 
 1. **开发期**：新仓建仓即随迁 CONTEXT/ADR（修订内容见第 6 章）。
-2. **验收期**：前置——手动迁移本机凭据至 forager config.toml（第 3 章映射表）→ **L0 门**（doctor 8-provider 全绿）→ 自动化四层全绿 → **制品门**（H10）：从正式 GitHub Release 资产干净安装（权限/架构/PATH/`--version`）→ doctor → L1–L3 → 人工清单五项。
+2. **验收期**：前置——手动迁移本机凭据至 forager config.toml（第 3 章映射表）→ **L0 门**（doctor 8-provider 全绿）→ 自动化四层全绿 → **制品门**（H10）：从正式 GitHub Release 资产干净安装（权限/架构/PATH/`--version`）→ doctor → P1/P2/C14 → 人工清单五项。
 3. **退役链**：以 [#61 原链为唯一权威](https://github.com/jfmoe/smartsearch/issues/61)（本章不复述，见第 6 章）。回退轻量化（H16）：archive 前验证本机旧 `smart-search` 命令已不可达；回退路径一行——archive 可逆、npm 旧版可重装；不做完整 rollback 方案。
