@@ -5,6 +5,9 @@ const path = require("node:path");
 const packageRoot = path.resolve(__dirname, "..", "..");
 const venvDir = path.join(packageRoot, ".smart-search-python");
 
+console.log("@jfmoe/smart-search has moved to forager: https://github.com/jfmoe/forager");
+console.log("Install the replacement Skill with: npx skills add jfmoe/forager");
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: packageRoot,

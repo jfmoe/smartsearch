@@ -51,6 +51,7 @@ if (!fs.existsSync(pythonPath)) {
 run(pythonPath, ["-m", "pip", "install", "--disable-pip-version-check", "-e", ".[dev]"]);
 run(process.execPath, ["npm/scripts/verify-release-metadata.js"]);
 run(process.execPath, ["npm/scripts/verify-release-policy.js"]);
+run(process.execPath, ["npm/scripts/test-retirement-notice.js"]);
 run(pythonPath, ["scripts/sync-skill.py", "--check"]);
 run(pythonPath, ["-m", "pytest"]);
 run(process.execPath, ["npm/scripts/test-wrapper-repair.js"]);
