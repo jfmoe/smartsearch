@@ -1,9 +1,9 @@
-# smart-search
+# smart-search — archived
 
 > [!IMPORTANT]
-> This package has been replaced by [forager](https://github.com/jfmoe/forager) and is deprecated.
-> Install the current Skill with `npx skills add jfmoe/forager`; use the forager GitHub Releases for
-> the CLI. The Python implementation and its npm releases remain available as a historical archive.
+> This project has been rewritten as [forager](https://github.com/jfmoe/forager). Use that repository
+> for the current CLI, Skill, documentation, and issue tracker. This archived repository preserves
+> the Python-era implementation and decision history only; it is no longer an active project.
 
 [简体中文](README.zh-CN.md) | English
 
